@@ -149,3 +149,88 @@ test('the screen: ask, ask every model, flip branches, edit into a new branch', 
   await done;
   assert.match(drawn, /\x1b\]111\x07/, 'the terminal gets its own colours back');
 });
+
+test('the dashboard: chats as trees, garden, keys, settings, network check, models on this computer', async () => {
+  const { serve } = require('../src/dashboard');
+  const d = await serve({ openBrowser: false });
+  const base = d.url.replace(/\/$/, '');
+  const j = async (p, body, method) => {
+    const r = await fetch(base + '/api/' + p, { method: method || (body ? 'POST' : 'GET'), headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+    return { status: r.status, body: await r.json() };
+  };
+  try {
+    const page = await (await fetch(d.url)).text();
+    assert.match(page, /"base":"\/[a-f0-9]{24}"/);
+    assert.equal((await fetch(d.url.replace(/[a-f0-9]{24}/, 'nope'))).status, 404, 'only the secret address works');
+
+    // keys: checked before they're saved, never shown back
+    assert.equal((await j('keys', { provider: 'groq', key: 'bad-key' })).status, 400);
+    let s = (await j('keys', { provider: 'groq', key: 'good-key' })).body;
+    assert.equal(s.providers.find((p) => p.id === 'groq').hasKey, true);
+    assert.ok(!JSON.stringify(s).includes('good-key'));
+
+    // garden
+    const models = (await j('models?fresh=1')).body.list;
+    assert.ok(models.some((m) => m.provider === 'groq' && m.plant));
+    const before = s.garden.length;
+    s = (await j('garden', { action: 'add', provider: 'groq', id: 'qwen/qwen-test-max', name: 'Qwen Test Max' })).body;
+    assert.equal(s.garden.length, before + 1);
+    assert.equal(s.garden[s.garden.length - 1].plant, 'bamboo');
+    s = (await j('garden', { action: 'up', provider: 'groq', id: 'qwen/qwen-test-max' })).body;
+    if (before) assert.equal(s.garden[s.garden.length - 2].id, 'qwen/qwen-test-max');
+    s = (await j('garden', { action: 'remove', provider: 'groq', id: 'qwen/qwen-test-max' })).body;
+    assert.equal(s.garden.length, before);
+
+    // a chat with two branches
+    const chat = new St.Chat();
+    const q = chat.add(null, 'user', { text: 'why is the sky blue' });
+    const a1 = chat.add(q.id, 'assistant', { text: 'scattering', model: 'openrouter:anthropic/claude-test-opus', name: 'Claude', provider: 'openrouter' });
+    chat.add(q.id, 'assistant', { text: 'light', model: 'openrouter:openai/gpt-test', name: 'GPT', provider: 'openrouter' });
+    chat.leaf = a1.id;
+    St.chats.save(chat);
+    const listed = (await j('chats')).body;
+    assert.ok(listed.some((c) => c.id === chat.id));
+    const got = (await j('chats/' + chat.id)).body;
+    assert.equal(Object.keys(got.nodes).length, 3);
+    assert.equal(got.nodes[a1.id].plant, 'maple');
+    assert.match(await (await fetch(base + '/api/chats/' + chat.id + '/export')).text(), /scattering/);
+    await j('chats/' + chat.id + '/rename', { title: 'Sky' });
+    assert.equal(St.chats.load(chat.id).title, 'Sky');
+    await j('chats/' + chat.id, undefined, 'DELETE');
+    assert.equal(St.chats.load(chat.id), null);
+
+    // settings
+    s = (await j('settings', { theme: 'autumn', system: 'Be brief.' })).body;
+    assert.equal(St.config.load().theme, 'autumn');
+    assert.equal(St.config.load().system, 'Be brief.');
+    assert.equal((await j('settings', { customBase: 'ftp://nope' })).status, 400);
+    await j('settings', { theme: 'grove' });
+
+    // network check (everything points at the pretend service, so it all "works")
+    const net = (await j('network')).body;
+    assert.ok(net.length >= 8 && net.filter((r) => r.id !== 'custom').every((r) => r.api === 'ok'));
+
+    // Ollama
+    assert.deepEqual((await j('ollama')).body.models.map((m) => m.name), ['llama-test:3b']);
+    const pulled = await (await fetch(base + '/api/ollama/pull', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'tiny-test:1b' }) })).text();
+    assert.match(pulled, /"success"/);
+    assert.ok((await j('ollama')).body.models.some((m) => m.name === 'tiny-test:1b'));
+    const nope = await (await fetch(base + '/api/ollama/pull', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'nope' }) })).text();
+    assert.match(nope, /does not exist/);
+    await j('ollama/delete', { model: 'tiny-test:1b' });
+    assert.ok(!(await j('ollama')).body.models.some((m) => m.name === 'tiny-test:1b'));
+  } finally { d.close(); }
+});
+
+test('network check tells blocked services apart', async () => {
+  const saved = process.env.TOT_URL_GROQ;
+  const spare = require('http').createServer();
+  await new Promise((r) => spare.listen(0, '127.0.0.1', r));
+  const port = spare.address().port;
+  await new Promise((r) => spare.close(r));
+  process.env.TOT_URL_GROQ = `http://127.0.0.1:${port}`; // nothing listens there now
+  const res = await P.checkNetwork({ timeout: 2000 });
+  process.env.TOT_URL_GROQ = saved;
+  assert.equal(res.find((r) => r.id === 'groq').api, 'off');
+  assert.equal(res.find((r) => r.id === 'openrouter').api, 'ok');
+});

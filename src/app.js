@@ -11,6 +11,8 @@
 //   │ + New chat         [🌳]  │ › Ask Some Model…                       │
 //   ╰──────────────────────────┴─────────────────────────────────────────╯
 
+const fs = require('fs');
+const path = require('path');
 const A = require('./ansi');
 const Th = require('./theme');
 const R = require('./rowan');
@@ -36,6 +38,7 @@ class App {
   constructor({ input = process.stdin, output = process.stdout } = {}) {
     this.cfg = St.config.load();
     this.keys = St.keys.load();
+    P.setCustomBase(this.cfg.customBase);
     Th.use(this.cfg.theme);
     this.ed = new Editor();
     this.chat = (this.cfg.last && St.chats.load(this.cfg.last)) || new St.Chat();
@@ -67,12 +70,38 @@ class App {
         this.dirty();
       }, 120);
       if (!this.garden.length) this.plantFirstGarden();
+      this.watcher = setInterval(() => this.reloadIfChanged(), 1500);
     });
+  }
+
+  /** The dashboard (or another tot) changed the garden, keys or settings: pick that up. */
+  reloadIfChanged() {
+    const stamp = (f) => { try { return fs.statSync(path.join(St.home(), f)).mtimeMs; } catch { return 0; } };
+    const now = stamp('config.json') + stamp('keys.json');
+    if (this.stamp === undefined) { this.stamp = now; return; }
+    if (now === this.stamp || Date.now() - (this.savedAt || 0) < 1500) { this.stamp = now; return; }
+    this.stamp = now;
+    const cfg = St.config.load();
+    this.cfg = { ...this.cfg, garden: cfg.garden, current: cfg.current, theme: cfg.theme, system: cfg.system, thoughts: cfg.thoughts, customBase: cfg.customBase };
+    this.keys = St.keys.load();
+    P.setCustomBase(this.cfg.customBase);
+    if (Th.name() !== this.cfg.theme) { Th.use(this.cfg.theme); this.ui.setPaper(Th.t().paper); }
+    this.dirty();
+  }
+
+  async dashboard() {
+    try {
+      if (!this.dash) this.dash = await require('./dashboard').serve();
+      else open(this.dash.url);
+      this.say('Opened your dashboard in the browser.');
+    } catch (e) { this.say(e.message, 8000); }
   }
 
   quit() {
     for (const j of this.jobs.values()) j.ac.abort();
     clearInterval(this.ticker);
+    clearInterval(this.watcher);
+    if (this.dash) this.dash.close();
     St.chats.save(this.chat);
     this.ui.stop();
     if (this.done) this.done();
@@ -80,7 +109,7 @@ class App {
 
   dirty() { this.ui.schedule(); }
   say(text, ms = 3500) { this.flash = { text, until: Date.now() + ms }; this.dirty(); }
-  saveCfg() { St.config.save(this.cfg); }
+  saveCfg() { this.savedAt = Date.now(); St.config.save(this.cfg); }
   react(scene, ms = 0) { this.mood = { scene, at: Date.now(), until: ms ? Date.now() + ms : 0 }; }
 
   // ── the garden ─────────────────────────────────────────────────────────────
@@ -408,6 +437,8 @@ class App {
         { label: 'Copy the last answer', hint: 'ctrl+y', run: () => this.copyAnswer(false) },
         { label: 'Save this chat as Markdown', run: () => this.exportChat() },
         { label: 'Delete this chat', run: () => this.deleteChat() },
+        { label: 'Open the dashboard', desc: 'chats as trees, garden, keys, models on this computer', run: () => this.dashboard() },
+        { label: 'Which services work on this network?', desc: 'for school or office Wi-Fi', run: () => this.networkPage() },
         { label: 'Help', run: () => this.pushPage(this.helpMenu()) },
         { label: 'Quit', hint: 'ctrl+d', run: () => this.quit() },
       ],
@@ -417,16 +448,31 @@ class App {
   keysMenu() {
     return {
       title: 'API keys',
-      note: 'Keys stay on this computer. OpenRouter is the easy one: one key, every big model.',
+      note: "Keys stay on this computer. OpenRouter is the easy one: one key, every big model. If a service is blocked where you are, check which ones work (Tab → Which services work on this network?), or use Ollama: it needs no internet.",
       items: P.IDS.map((id) => {
         const p = P.PROVIDERS[id];
         return {
           label: p.name, desc: p.noKey ? 'no key needed' : this.keys[id] ? '✓ key saved' : p.about,
-          run: () => (p.noKey ? this.gardenFrom(id) : this.pushPage(this.inputPage(`${p.name} key`, `Get one at ${p.keyUrl}, then paste it here.`, '', (v) => this.setKey(id, v), true))),
+          run: () => (p.noKey ? this.gardenFrom(id)
+            : p.custom && !this.cfg.customBase ? this.pushPage(this.inputPage('Address of the service', 'Like https://example.com/v1 (any OpenAI-compatible service).', '', (v) => { if (/^https?:\/\/\S+$/.test(v.trim())) { this.cfg.customBase = v.trim().replace(/\/+$/, ''); P.setCustomBase(this.cfg.customBase); this.saveCfg(); this.say('Saved the address. Now pick Other service again for its key.'); } else this.say('That should start with https://'); }))
+              : this.pushPage(this.inputPage(`${p.name} key`, p.keyUrl ? `Get one at ${p.keyUrl}, then paste it here.` : 'Paste its key here.', '', (v) => this.setKey(id, v), true))),
           keep: !p.noKey,
         };
       }),
     };
+  }
+
+  async networkPage() {
+    this.say('Checking which services this network lets through…', 15000);
+    const res = await P.checkNetwork();
+    const word = { ok: 'works', slow: 'slow', blocked: 'blocked', inspected: 'inspected', off: 'not running' };
+    const ok = res.filter((r) => r.api === 'ok' && r.id !== 'ollama').map((r) => r.name);
+    this.flash = null;
+    this.pushPage({
+      title: 'This network',
+      note: ok.length ? `Works here: ${ok.join(', ')}. Keys you saved somewhere else still work here.` : 'No online service gets through here, but Ollama models on this computer still work: they need no internet.',
+      items: res.map((r) => ({ label: r.name, desc: `answers: ${word[r.api] || r.api}${r.site ? ` · key website: ${word[r.site] || r.site}` : ''}`, run: () => {} })),
+    });
   }
 
   inputPage(title, note, value, done, secret = false) {
@@ -874,6 +920,7 @@ class App {
         Th.leaf('3.') + ' Your garden fills with the strongest model from each maker.', '',
         Th.dim('Free options: Google AI Studio and Groq have free tiers, and'),
         Th.dim('Ollama (ollama.com) runs models on this computer for nothing.'),
+        Th.dim('Is a site blocked where you are? Tab → Which services work on this network?'),
       ];
       const cw = Math.max(...lines.map((x) => A.vwidth(x)));
       const pad = ' '.repeat(Math.max(0, Math.floor((w - 1 - cw) / 2)));

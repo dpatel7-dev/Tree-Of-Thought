@@ -19,13 +19,19 @@ const PROVIDERS = {
     name: 'Hugging Face', kind: 'openai', base: 'https://router.huggingface.co/v1',
     keyUrl: 'https://huggingface.co/settings/tokens', about: 'open models, with free monthly credits',
   },
-  ollama: { name: 'Ollama', kind: 'openai', base: 'http://127.0.0.1:11434/v1', noKey: true, keyUrl: 'https://ollama.com/download', about: 'models running on this computer: free and private' },
+  mistral: { name: 'Mistral', kind: 'openai', base: 'https://api.mistral.ai/v1', keyUrl: 'https://console.mistral.ai/api-keys', about: 'Mistral models' },
+  cerebras: { name: 'Cerebras', kind: 'openai', base: 'https://api.cerebras.ai/v1', keyUrl: 'https://cloud.cerebras.ai', about: 'very fast open models' },
+  ollama: { name: 'Ollama', kind: 'openai', base: 'http://127.0.0.1:11434/v1', noKey: true, keyUrl: 'https://ollama.com/download', about: 'models running on this computer: free, private, and no internet needed' },
+  custom: { name: 'Other service', kind: 'openai', base: '', custom: true, keyUrl: '', about: 'any OpenAI-compatible address (set it in the dashboard, or TOT_URL_CUSTOM)' },
 };
+let customBase = '';
+/** Where the "Other service" lives (from your settings). */
+function setCustomBase(url) { customBase = /^https?:\/\/\S+$/.test(String(url || '')) ? String(url) : ''; }
 const IDS = Object.keys(PROVIDERS);
 
 /** Where a provider lives (tests and custom setups can point it elsewhere). */
 function baseOf(id) {
-  return (process.env[`TOT_URL_${id.toUpperCase()}`] || PROVIDERS[id].base).replace(/\/+$/, '');
+  return (process.env[`TOT_URL_${id.toUpperCase()}`] || (id === 'custom' ? customBase : '') || PROVIDERS[id].base).replace(/\/+$/, '');
 }
 
 function headers(id, key) {
@@ -205,6 +211,91 @@ async function* sse(body) {
   if (rest) yield rest;
 }
 
+// ── what this network lets through ──────────────────────────────────────────
+
+/**
+ * Can this computer reach each service (and the page where you get its key)?
+ * Some networks - schools, offices - block some of them. Resolves with
+ * [{ id, name, api: 'ok'|'blocked'|'inspected'|'slow'|'off', site: …, ms, why }].
+ */
+async function checkNetwork({ timeout = 7000 } = {}) {
+  const probe = async (url) => {
+    const t0 = Date.now();
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), timeout);
+    try {
+      const res = await fetch(url, { method: 'GET', signal: ac.signal, redirect: 'manual' });
+      const type = res.headers.get('content-type') || '';
+      let body = '';
+      if (/html/.test(type)) { try { body = (await res.text()).slice(0, 4000); } catch { /* fine */ } }
+      // filters often answer with their own "this site is blocked" page
+      if (/blocked|filtered|restricted|not allowed|access denied|lightspeed|securly|goguardian|fortiguard|contentkeeper|iboss|websense|zscaler/i.test(body) && !/openrouter|openai|anthropic|google|groq|hugging|mistral|cerebras/i.test(res.url || '')) return { state: 'blocked', ms: Date.now() - t0, why: 'a filter answered instead' };
+      return { state: Date.now() - t0 > 4000 ? 'slow' : 'ok', ms: Date.now() - t0, why: String(res.status) };
+    } catch (e) {
+      const code = (e.cause && (e.cause.code || e.cause.message)) || e.name || String(e);
+      if (e.name === 'AbortError') return { state: 'blocked', ms: Date.now() - t0, why: 'no answer (timed out)' };
+      if (/CERT|SELF_SIGNED|UNABLE_TO_VERIFY|certificate/i.test(code)) return { state: 'inspected', ms: Date.now() - t0, why: 'this network replaces secure certificates' };
+      if (/ECONNREFUSED/.test(code)) return { state: 'off', ms: Date.now() - t0, why: 'nothing is listening' };
+      return { state: 'blocked', ms: Date.now() - t0, why: code };
+    } finally { clearTimeout(timer); }
+  };
+  const ids = IDS.filter((id) => id !== 'custom' || customBase);
+  return Promise.all(ids.map(async (id) => {
+    const p = PROVIDERS[id];
+    const [api, site] = await Promise.all([probe(baseOf(id) + '/models'), p.keyUrl && !p.noKey ? probe(p.keyUrl) : Promise.resolve(null)]);
+    return { id, name: p.name, api: api.state, site: site ? site.state : null, ms: api.ms, why: api.why };
+  }));
+}
+
+// ── Ollama: models that run on this computer ───────────────────────────────
+
+const ollamaRoot = () => baseOf('ollama').replace(/\/v1$/, '');
+
+/** What's downloaded: [{ name, size, family }], or null if Ollama isn't running. */
+async function ollamaModels() {
+  try {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 1500);
+    const res = await fetch(ollamaRoot() + '/api/tags', { signal: ac.signal });
+    clearTimeout(t);
+    if (!res.ok) return null;
+    const j = await res.json();
+    return (j.models || []).map((m) => ({ name: m.name, size: m.size || 0, family: (m.details && m.details.family) || '' }));
+  } catch { return null; }
+}
+
+/** Download a model into Ollama. onProgress({ status, done, total }). */
+async function ollamaPull(name, { onProgress = () => {}, signal } = {}) {
+  let res;
+  try {
+    res = await fetch(ollamaRoot() + '/api/pull', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: name, stream: true }), signal });
+  } catch (e) { throw friendlyNetwork('ollama', e); }
+  if (!res.ok) throw new ApiError(`Ollama couldn't download "${name}" (${res.status}). Check the name on ollama.com/library.`, res.status);
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i).trim();
+      buf = buf.slice(i + 1);
+      if (!line) continue;
+      let j;
+      try { j = JSON.parse(line); } catch { continue; }
+      if (j.error) throw new ApiError(`Ollama: ${j.error}`);
+      onProgress({ status: j.status || '', done: j.completed || 0, total: j.total || 0 });
+    }
+  }
+}
+
+async function ollamaDelete(name) {
+  const res = await fetch(ollamaRoot() + '/api/delete', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: name }) });
+  if (!res.ok) throw new ApiError(`Ollama couldn't remove "${name}" (${res.status}).`, res.status);
+}
+
 /** Is Ollama running here? (A free garden with no keys at all.) */
 async function ollamaHere() {
   try {
@@ -216,4 +307,4 @@ async function ollamaHere() {
   } catch { return null; }
 }
 
-module.exports = { PROVIDERS, IDS, baseOf, listModels, pickGarden, chat, sse, ollamaHere, ApiError, normalize };
+module.exports = { PROVIDERS, IDS, baseOf, listModels, pickGarden, chat, sse, ollamaHere, ApiError, normalize, setCustomBase, checkNetwork, ollamaModels, ollamaPull, ollamaDelete };

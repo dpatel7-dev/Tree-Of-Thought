@@ -16,11 +16,14 @@ const HELP = `
   tot                          open the garden
   tot ask "question"           ask the current model, answer printed here
   tot ask -m gemini "question" ...or a model from your garden by name
-  tot key <service> <key>      save an API key (${P.IDS.filter((i) => i !== 'ollama').join(', ')})
+  tot key <service> <key>      save an API key (${P.IDS.filter((i) => i !== 'ollama' && i !== 'custom').join(', ')})
   tot keys                     which keys are saved
   tot garden                   the models in your garden
   tot models [search]          every model your keys can use
   tot theme <name>             colours: ${Th.NAMES.join(', ')}
+  tot dashboard                your chats (as trees), garden, keys and settings in the browser
+  tot check                    which AI services this network lets through
+  tot pull <model>             download a model to run on this computer (needs Ollama)
   tot update                   get the newest version
   tot uninstall                remove Tree of Thought (add --all to delete your chats and keys too)
   tot --version
@@ -35,7 +38,41 @@ async function main(argv) {
   const [cmd, ...rest] = argv;
   const cfg = St.config.load();
   Th.use(cfg.theme);
+  P.setCustomBase(cfg.customBase);
   switch (cmd) {
+    case 'dashboard': case 'web': case 'browser': {
+      const d = await require('./dashboard').serve();
+      out(`\n  Your garden is open in the browser: ${d.url}\n  ${A.paint('Keep this window open while you use it (Ctrl+C to stop).', { fg: Th.t().dim })}\n`);
+      await new Promise(() => {});
+      return;
+    }
+    case 'check': case 'doctor': case 'network': {
+      out('\n  Checking which AI services this network lets through…\n');
+      const res = await P.checkNetwork();
+      const word = { ok: ['works', Th.t().ok], slow: ['slow', Th.t().warn], blocked: ['blocked', Th.t().err], inspected: ['inspected', Th.t().warn], off: ['not running', Th.t().dim] };
+      const w = (s) => (s ? A.paint((word[s] || [s])[0].padEnd(12), { fg: (word[s] || [])[1] }) : A.paint('-'.padEnd(12), { fg: Th.t().dim }));
+      out(A.paint('  ' + 'service'.padEnd(18) + 'answers'.padEnd(12) + 'key website', { fg: Th.t().dim }));
+      for (const r of res) out('  ' + r.name.padEnd(18) + w(r.api) + w(r.site));
+      const ok = res.filter((r) => r.api === 'ok' && r.id !== 'ollama').map((r) => r.name);
+      out('\n  ' + (ok.length ? `Works on this network: ${ok.join(', ')}.` : 'No online service gets through here, but models on this computer (Ollama) still work.'));
+      if (res.some((r) => r.api === 'inspected')) out(A.paint('  "inspected" means this network swaps secure certificates, so those connections aren\'t trusted.', { fg: Th.t().dim }));
+      out('');
+      return;
+    }
+    case 'pull': {
+      const name = rest[0];
+      if (!name) throw new Error('Which model? tot pull llama3.2   (names are on ollama.com/library)');
+      let last = '';
+      await P.ollamaPull(name, {
+        onProgress: (p) => {
+          const line = p.total ? `${p.status} ${Math.round((100 * p.done) / p.total)}%` : p.status;
+          if (line !== last && process.stdout.isTTY) process.stdout.write(`\r  ${line.padEnd(60).slice(0, 60)}`);
+          last = line;
+        },
+      });
+      out(`\r  ${A.paint('✓', { fg: Th.t().ok })} ${name} is on this computer. Plant it: tot, Tab → Plant a model.`.padEnd(70));
+      return;
+    }
     case undefined: {
       if (!process.stdin.isTTY || !process.stdout.isTTY) { out(HELP); return; }
       const { App } = require('./app');

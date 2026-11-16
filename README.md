@@ -64,9 +64,36 @@ if Ollama is running, Tree of Thought finds it by itself.
 | Google AI Studio | <https://aistudio.google.com/apikey> |
 | Groq | <https://console.groq.com/keys> |
 | Hugging Face | <https://huggingface.co/settings/tokens> |
+| Mistral | <https://console.mistral.ai/api-keys> |
+| Cerebras | <https://cloud.cerebras.ai> |
 | Ollama | no key — <https://ollama.com/download> |
+| Other service | any OpenAI-compatible address (set it in the dashboard) |
 
 Keys stay on your computer, in `~/.tot/keys.json` (readable only by you).
+
+### On a school or office network
+
+Some networks block some AI services (or the websites where you get their keys).
+
+- **See what works here:** `tot check` (or **Tab → Which services work on this network?**,
+  or the dashboard's **Network check**). It tests every service and its key website.
+- **Keys work anywhere:** a key you made at home keeps working on any network where the
+  service itself gets through.
+- **Models on your own computer need no internet at all:** install
+  [Ollama](https://ollama.com/download), then `tot pull llama3.2` (or use **This computer**
+  in the dashboard), and plant it in your garden.
+
+## The dashboard
+
+`tot dashboard` (or **Tab → Open the dashboard**) opens your garden in the browser:
+
+- **Chats** drawn as trees: every dot is a message, click one to read its branch.
+- **Garden**: plant, uproot and reorder models, with every model your keys can reach.
+- **Keys**: paste, check and remove keys (it never shows them back).
+- **This computer**: download Ollama models and plant them.
+- **Network check** and **Settings** (colours, instructions, thinking).
+
+It runs only on your computer, and tot picks up whatever you change there right away.
 
 ## Keys
 
@@ -96,6 +123,9 @@ git diff | tot ask "review this change"
 tot garden          # your models
 tot models claude   # every model your keys can use
 tot keys            # which keys are saved
+tot dashboard       # chats, garden, keys and settings in the browser
+tot check           # which services this network lets through
+tot pull llama3.2   # download a model to run on this computer (with Ollama)
 tot update          # newest version
 tot uninstall       # remove it (--all also deletes chats and keys)
 ```

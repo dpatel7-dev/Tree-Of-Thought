@@ -24,6 +24,8 @@ const MODELS = [
   architecture: { output_modalities: /image/.test(id) ? ['image'] : ['text'] },
 }));
 
+const OLLAMA = ['llama-test:3b'];
+
 function answerFor(model, question) {
   if (/fail/i.test(question)) return null;
   const who = model.split('/').pop();
@@ -39,6 +41,17 @@ function start(port = 0, { delay = 8 } = {}) {
       const auth = req.headers.authorization || req.headers['x-api-key'] || '';
       if (/bad-key/.test(auth)) { res.writeHead(401, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { message: 'Invalid API key' } })); }
       if (req.url.endsWith('/models')) { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ data: MODELS })); }
+      // a pretend Ollama too
+      if (req.url === '/api/tags') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ models: OLLAMA.map((name) => ({ name, size: 2e9, details: { family: 'llama' } })) })); }
+      if (req.url === '/api/pull') {
+        const want = JSON.parse(body || '{}').model;
+        res.writeHead(200, { 'content-type': 'application/x-ndjson' });
+        if (/nope/.test(want)) return res.end(JSON.stringify({ error: 'pull model manifest: file does not exist' }) + '\n');
+        for (const done of [0, 5e8, 1e9]) { res.write(JSON.stringify({ status: 'pulling layer', total: 1e9, completed: done }) + '\n'); await new Promise((r) => setTimeout(r, delay)); }
+        OLLAMA.push(want);
+        return res.end(JSON.stringify({ status: 'success' }) + '\n');
+      }
+      if (req.url === '/api/delete') { const want = JSON.parse(body || '{}').model; const i = OLLAMA.indexOf(want); if (i >= 0) OLLAMA.splice(i, 1); res.writeHead(200); return res.end(); }
       let j = {};
       try { j = JSON.parse(body || '{}'); } catch { /* bad */ }
       seen.push({ url: req.url, body: j, headers: req.headers });
