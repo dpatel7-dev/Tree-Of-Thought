@@ -38,7 +38,7 @@ Windows (PowerShell):
 irm https://djp7.pythonanywhere.com/tot/install.ps1 | iex
 ```
 
-(Or straight from GitHub: `curl -fsSL https://raw.githubusercontent.com/dpatel7-dev/Terminal-Of-Though-ToT-/main/install.sh | sh`.)
+(Or straight from GitHub: `curl -fsSL https://raw.githubusercontent.com/dpatel7-dev/Tree-Of-Thought/main/install.sh | sh`.)
 Nothing to set up beforehand: if you don't have Node.js 18+, the installer puts a private copy inside `~/.tot`.
 
 ## Plant your first models

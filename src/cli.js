@@ -141,7 +141,7 @@ function installUrl(kind) {
   let site = '';
   try { site = fs.readFileSync(path.join(St.home(), 'hub'), 'utf8').trim(); } catch { /* installed from GitHub */ }
   if (/^https?:\/\//.test(site)) return `${site.replace(/\/+$/, '')}/tot/install.${kind}`;
-  return `https://raw.githubusercontent.com/dpatel7-dev/Terminal-Of-Though-ToT-/main/install.${kind}`;
+  return `https://raw.githubusercontent.com/dpatel7-dev/Tree-Of-Thought/main/install.${kind}`;
 }
 
 function update() {

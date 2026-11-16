@@ -36,7 +36,7 @@ function headers(id, key) {
     h['anthropic-version'] = '2023-06-01';
   } else if (key) h.authorization = `Bearer ${key}`;
   if (id === 'openrouter') {
-    h['http-referer'] = 'https://github.com/dpatel7-dev/Terminal-Of-Though-ToT-';
+    h['http-referer'] = 'https://github.com/dpatel7-dev/Tree-Of-Thought';
     h['x-title'] = 'Tree of Thought';
   }
   return h;
