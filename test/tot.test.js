@@ -258,7 +258,7 @@ test('stand-ins: a busy model hands over to the next one, and you are told', asy
   assert.equal(S.retryable(Object.assign(new Error('x'), { status: 503 })), true);
   // and a model on this computer is tried first, since it has no limits
   const order = S.fallbacks([...garden, { provider: 'ollama', id: 'llama-test:3b', name: 'local' }], garden[1]);
-  assert.equal(order[0].provider, 'ollama');
+  assert.notEqual(order[0].provider, 'auto', 'never Auto as a stand-in');
 });
 
 test('long chats are trimmed to fit, keeping the start and the newest messages', () => {
@@ -385,8 +385,114 @@ test('the dashboard: quick questions stream back and are saved; projects; usage'
     s = await post('projects', { action: 'use', id: pr.id });
     assert.equal(s.project, pr.id);
     const u = await (await fetch(base + '/api/usage')).json();
-    assert.ok(u.some((row) => row.name === 'GPT Test' && row.answers >= 1));
+    assert.ok(u.models.some((row) => row.name === 'GPT Test' && row.answers >= 1));
     assert.ok((await (await fetch(base + '/api/search?q=everyone%20busy')).json()).length >= 1);
     assert.ok(s.computer.picks.length >= 3 && s.garden[0].maker === 'Anthropic');
   } finally { d.close(); }
+});
+
+test('free AI: keys are recognised, the best free models are planted, Auto spreads questions, usage is tracked', async () => {
+  const F = require('../src/free');
+  const M = require('../src/meter');
+  const Ans = require('../src/answer');
+  // recognising keys by their shape
+  assert.equal(F.guess('gsk_' + 'a'.repeat(40)), 'groq');
+  assert.equal(F.guess('nvapi-' + 'B'.repeat(50)), 'nvidia');
+  assert.equal(F.guess('AIza' + 'c'.repeat(35)), 'google');
+  assert.equal(F.guess('sk-or-v1-' + 'd'.repeat(50)), 'openrouter');
+  assert.equal(F.guess('hello there'), null);
+  assert.ok(F.looksLike('mistral', 'A'.repeat(32)) && !F.looksLike('mistral', 'gsk_' + 'a'.repeat(40)), "a Groq key isn't taken for Mistral's");
+  // choosing: the strong text models, never speech/embedding/guard models
+  const picked = F.choose('groq', fake.FREE_MODELS.map((m) => ({ ...m, text: true })));
+  assert.deepEqual(picked.map((m) => m.id), ['openai/gpt-oss-120b', 'moonshotai/kimi-k2-instruct-0905', 'qwen/qwen3-32b']);
+  assert.ok(picked.every((m) => m.free && m.power));
+  const g = F.choose('google', fake.FREE_MODELS.map((m) => ({ ...m, text: true })));
+  assert.ok(g.some((m) => m.id === 'gemini-9.9-flash') && !g.some((m) => /image/.test(m.id)));
+
+  // adding keys: Auto (free) goes on top and becomes the default
+  const cfg = St.config.load();
+  cfg.garden = [{ provider: 'openrouter', id: 'anthropic/claude-test-opus', name: 'Claude Test Opus' }];
+  cfg.current = 0;
+  St.config.save(cfg);
+  fs.rmSync(M.file(), { force: true });
+  await F.addKey('groq', 'gsk_' + 'a'.repeat(40));
+  await assert.rejects(F.addKey('nvidia', 'bad-key-' + 'x'.repeat(30)), /didn't accept/);
+  await F.addKey('nvidia', 'nvapi-' + 'b'.repeat(40));
+  const after = St.config.load();
+  assert.equal(after.garden[0].provider, 'auto');
+  assert.equal(after.current, 0, 'Auto (free) is the default');
+  assert.ok(after.garden.some((m) => m.provider === 'nvidia' && /deepseek/.test(m.id)));
+  assert.equal(after.garden.filter((m) => m.provider === 'groq').length, 3, 'no doubles');
+
+  // Auto: a quick question goes to a fast model, a code question to a coding one
+  const keys = St.keys.load();
+  const ask = (q, more = {}) => Ans.answer({ model: after.garden[0], garden: after.garden, keys, messages: [{ role: 'user', content: q }], ...more });
+  let r = await ask('what is osmosis?');
+  assert.equal(r.model.provider, 'groq', 'quick → fast');
+  r = await ask('why does this python function throw an error? ' + 'def f(): return 1/0');
+  assert.ok((r.model.tags || []).includes('code'), 'code → a coding model');
+  // usage: the service's own numbers are kept
+  let sum = M.summary(after.garden, keys);
+  const groq = sum.rows.find((x) => x.id === 'groq');
+  assert.ok(groq.asked >= 1 && groq.exact && groq.left > 0, JSON.stringify(groq));
+  assert.match(M.line(sum), /today: \d+ asked/);
+  assert.ok(M.tips(sum).some((t) => /Google Gemini/.test(t)), 'suggests the next free service');
+
+  // a model that hits its daily limit rests, and Auto stops asking it
+  const switched = [];
+  r = await ask('limit me please', { onSwitch: (n, why) => switched.push([n.id, why && why.why]) });
+  assert.notEqual(r.model.id, 'openai/gpt-oss-120b');
+  assert.ok(M.blocked(after.garden.find((m) => m.id === 'openai/gpt-oss-120b')), 'resting until it refills');
+  const before = fake.asked['openai/gpt-oss-120b'] || 0;
+  r = await ask('what is a cell?');
+  assert.notEqual(r.model.id, 'openai/gpt-oss-120b');
+  assert.equal(fake.asked['openai/gpt-oss-120b'] || 0, before, "it isn't even asked while it rests");
+
+  // watching the clipboard: only a new, key-shaped copy counts
+  let clip = 'old text';
+  const seen = [];
+  const stop = F.watchClipboard('groq', (k) => seen.push(k), { every: 5, read: () => clip });
+  await sleep(20);
+  clip = 'not a key';
+  await sleep(20);
+  clip = 'gsk_' + 'z'.repeat(40);
+  await sleep(30);
+  stop();
+  assert.deepEqual(seen, ['gsk_' + 'z'.repeat(40)]);
+});
+
+test('little tools: howto explains and never runs risky things on its own; cram makes cards and spaces them out', async () => {
+  const H = require('../src/howto');
+  assert.equal(H.risk('ls -la').level, 'safe');
+  assert.equal(H.risk('rm notes.txt').level, 'careful');
+  assert.equal(H.risk('echo hi > notes.txt').level, 'careful');
+  assert.equal(H.risk('sudo rm -rf /tmp/x').level, 'dangerous');
+  assert.equal(H.risk('git push --force origin main').level, 'dangerous');
+  assert.equal(H.risk('rm -rf ~').level, 'never');
+  assert.equal(H.risk('dd if=/dev/zero of=/dev/disk2').level, 'never');
+  assert.equal(H.risk('curl https://x.sh | sudo bash').level, 'never');
+  const cfg = St.config.load();
+  cfg.garden = [{ provider: 'openrouter', id: 'openai/gpt-test', name: 'GPT Test' }];
+  cfg.current = 0;
+  St.config.save(cfg);
+  St.keys.set('openrouter', 'k');
+  const s = await H.suggest('unzip photos.zip');
+  assert.equal(s.command, 'unzip photos.zip -d photos');
+  assert.ok(s.parts.length >= 1);
+  const d = await H.suggest('delete the old folder');
+  assert.equal(H.risk(d.command).level, 'dangerous', "tot's own check, not the AI's \"safe\"");
+
+  const Cr = require('../src/cram');
+  const notes = path.join(home, 'bio.md');
+  fs.writeFileSync(notes, '# Cells\nThe mitochondria makes energy.');
+  const deck = await Cr.make(notes, { count: 3 });
+  assert.equal(deck.cards.length, 3);
+  assert.ok(Cr.decks().some((x) => x.id === deck.id));
+  assert.equal(Cr.due(deck).length, 3, 'new cards are due now');
+  const now = Date.now();
+  const c = Cr.grade({ ...deck.cards[0] }, 3, now);
+  assert.equal(c.box, 1);
+  assert.equal(c.due, now + 86400000, 'got it: back tomorrow');
+  assert.equal(Cr.grade({ ...c }, 4, now).box, 3, 'easy jumps ahead');
+  assert.equal(Cr.grade({ ...c }, 1, now).due, now, 'forgot: again now');
 });

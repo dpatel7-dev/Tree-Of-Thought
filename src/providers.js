@@ -21,13 +21,26 @@ const PROVIDERS = {
   },
   mistral: { name: 'Mistral', kind: 'openai', base: 'https://api.mistral.ai/v1', keyUrl: 'https://console.mistral.ai/api-keys', about: 'Mistral models' },
   cerebras: { name: 'Cerebras', kind: 'openai', base: 'https://api.cerebras.ai/v1', keyUrl: 'https://cloud.cerebras.ai', about: 'very fast open models' },
+  nvidia: { name: 'NVIDIA', kind: 'openai', base: 'https://integrate.api.nvidia.com/v1', keyUrl: 'https://build.nvidia.com/settings/api-keys', about: '100+ big open models (DeepSeek, Kimi, Qwen…), free at 40 a minute' },
+  ollamacloud: { name: 'Ollama Cloud', kind: 'openai', base: 'https://ollama.com/v1', keyUrl: 'https://ollama.com/settings/keys', about: "big open models on Ollama's computers (free light use)" },
+  sambanova: { name: 'SambaNova', kind: 'openai', base: 'https://api.sambanova.ai/v1', keyUrl: 'https://cloud.sambanova.ai/apis', about: 'fast big open models (a few free questions a day)' },
   ollama: { name: 'Ollama', kind: 'openai', base: 'http://127.0.0.1:11434/v1', noKey: true, keyUrl: 'https://ollama.com/download', about: 'models running on this computer: free, private, and no internet needed' },
   custom: { name: 'Other service', kind: 'openai', base: '', custom: true, keyUrl: '', about: 'any OpenAI-compatible address (set it in the dashboard, or TOT_URL_CUSTOM)' },
+  // not a service: "Auto (free)" picks one of your free models for each question (see answer.js)
+  auto: { name: 'Tree of Thought', kind: 'auto', base: '', noKey: true, hidden: true, keyUrl: '', about: 'picks the best free model with room left' },
 };
 let customBase = '';
 /** Where the "Other service" lives (from your settings). */
 function setCustomBase(url) { customBase = /^https?:\/\/\S+$/.test(String(url || '')) ? String(url) : ''; }
-const IDS = Object.keys(PROVIDERS);
+const IDS = Object.keys(PROVIDERS).filter((id) => !PROVIDERS[id].hidden);
+
+/** The rate-limit headers a service sent back (how much is left), if any. */
+function limitHeaders(res) {
+  const out = {};
+  if (!res || !res.headers) return out;
+  for (const [k, v] of res.headers) if (/^(x-ratelimit-|retry-after$)/i.test(k)) out[k.toLowerCase()] = v;
+  return out;
+}
 
 /** Where a provider lives (tests and custom setups can point it elsewhere). */
 function baseOf(id) {
@@ -70,8 +83,8 @@ async function failure(id, res) {
   if (res.status === 401 || res.status === 403) return new ApiError(`${name} didn't accept your key. Check it, then set it again with /key ${id} <your key>. (${detail || res.status})`, res.status);
   if (res.status === 402) return new ApiError(`${name} says your account is out of credit. (${detail})`, res.status);
   if (res.status === 404) return new ApiError(`${name} doesn't know that model. (${detail || 'not found'})`, res.status);
-  if (res.status === 429) return new ApiError(`${name} says slow down (too many requests, or a free limit was reached). Try again in a moment. (${detail})`, res.status);
-  return new ApiError(`${name} answered with an error ${res.status}: ${detail || res.statusText}`, res.status);
+  if (res.status === 429) return Object.assign(new ApiError(`${name} says slow down (too many requests, or a free limit was reached). Try again in a moment. (${detail})`, res.status), { headers: limitHeaders(res), detail });
+  return Object.assign(new ApiError(`${name} answered with an error ${res.status}: ${detail || res.statusText}`, res.status), { headers: limitHeaders(res), detail });
 }
 
 function friendlyNetwork(id, e) {
@@ -146,6 +159,7 @@ function pickGarden(models, { free = false, max = 8 } = {}) {
 async function chat({ provider, key, model, messages, system, signal, onText = () => {}, onThought = () => {} }) {
   const p = PROVIDERS[provider];
   if (!p) throw new ApiError(`Unknown provider "${provider}".`);
+  if (p.kind === 'auto') throw new ApiError('Auto picks a model for you: ask through answer.js, not providers.chat.');
   if (!p.noKey && !key) throw new ApiError(`There's no key for ${p.name} yet. Get one at ${p.keyUrl} and add it with /key ${provider} <your key>.`);
   const body = p.kind === 'anthropic'
     ? { model, max_tokens: 8192, stream: true, messages, ...(system ? { system } : {}) }
@@ -158,7 +172,7 @@ async function chat({ provider, key, model, messages, system, signal, onText = (
   } catch (e) { throw friendlyNetwork(provider, e); }
   if (!res.ok) throw await failure(provider, res);
 
-  const out = { text: '', thought: '', usage: null };
+  const out = { text: '', thought: '', usage: null, headers: limitHeaders(res) };
   const take = p.kind === 'anthropic' ? anthropicEvent : openaiEvent;
   try {
     for await (const data of sse(res.body)) {
@@ -307,4 +321,4 @@ async function ollamaHere() {
   } catch { return null; }
 }
 
-module.exports = { PROVIDERS, IDS, baseOf, listModels, pickGarden, chat, sse, ollamaHere, ApiError, normalize, setCustomBase, checkNetwork, ollamaModels, ollamaPull, ollamaDelete };
+module.exports = { limitHeaders, PROVIDERS, IDS, baseOf, listModels, pickGarden, chat, sse, ollamaHere, ApiError, normalize, setCustomBase, checkNetwork, ollamaModels, ollamaPull, ollamaDelete };

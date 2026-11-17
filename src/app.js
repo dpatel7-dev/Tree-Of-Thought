@@ -22,6 +22,8 @@ const St = require('./store');
 const Md = require('./markdown');
 const S = require('./smart');
 const Ans = require('./answer');
+const F = require('./free');
+const Me = require('./meter');
 const { Editor } = require('./editor');
 const { Tui, fit, center, spread, copy, open, size, bar } = require('./tui');
 const pkg = require('../package.json');
@@ -31,6 +33,7 @@ const money = (v) => (v === null || v === undefined || Number.isNaN(v) ? null : 
 
 /** "Anthropic · via OpenRouter", or just "OpenRouter" when it's the maker's own service. */
 function whoText(m) {
+  if (F.isAuto(m)) return 'picks a free model for each question';
   const maker = S.makerOf(m);
   const via = m.provider === 'ollama' ? 'this computer' : P.PROVIDERS[m.provider] ? P.PROVIDERS[m.provider].name : m.provider;
   if (!maker || maker === via) return via;
@@ -38,6 +41,7 @@ function whoText(m) {
 }
 
 function priceText(m) {
+  if (F.isAuto(m)) return 'free · spreads across your services';
   if (m.provider === 'ollama') return 'on this computer · free';
   if (m.free || /:free$/.test(m.id)) return 'free';
   if (m.price && m.price.in !== null && m.price.out !== null && m.price.in !== undefined) return `$${money(m.price.in)} in · $${money(m.price.out)} out /M`;
@@ -128,15 +132,30 @@ class App {
   // ── the garden ─────────────────────────────────────────────────────────────
   /** No models yet: use Ollama if it's running, or build one from the first key. */
   async plantFirstGarden() {
+    const free = F.SERVICES.filter((sv) => this.keys[sv.id]);
+    if (free.length) { for (const sv of free) await this.plantFree(sv.id, this.keys[sv.id], true).catch(() => {}); return; }
     const withKey = P.IDS.find((id) => this.keys[id]);
     if (withKey) return this.gardenFrom(withKey);
-    const local = await P.ollamaHere();
-    if (local && local.length && !this.garden.length) {
-      this.cfg.garden = local.slice(0, 6).map((m) => ({ provider: 'ollama', id: m.id, name: m.name }));
-      this.cfg.current = 0;
-      this.saveCfg();
-      this.say(`Found Ollama on this computer: planted ${local.length > 6 ? 6 : local.length} local models.`);
-    }
+    // nothing yet: the welcome card offers free setup (Enter)
+  }
+
+  /** A key for a free service: check it, save it, plant its best free models, make Auto the default. */
+  async plantFree(id, key, quiet) {
+    const sv = F.byId(id);
+    if (!quiet) this.say(`Checking your ${sv.name} key…`, 8000);
+    try {
+      const { picked, cfg } = await F.addKey(id, key, this.cfg);
+      this.cfg = cfg;
+      this.keys = St.keys.load();
+      this.savedAt = Date.now();
+      this.cursor = { kind: 'model', i: this.cfg.current };
+      if (!quiet) this.say(`✓ ${sv.name} works: planted ${picked.map((m) => m.name).join(', ')}. Auto (free) now spreads your questions across ${F.SERVICES.filter((x) => this.keys[x.id]).length} free service${F.SERVICES.filter((x) => this.keys[x.id]).length === 1 ? '' : 's'}.`, 9000);
+      this.react('bloom', R.length('bloom'));
+      return picked;
+    } catch (e) {
+      if (!quiet) this.say(e.message, 9000);
+      throw e;
+    } finally { this.dirty(); }
   }
 
   async gardenFrom(provider) {
@@ -190,7 +209,14 @@ class App {
 
   /** Dragging a file into the terminal types its path: attach it instead. */
   onPaste(t) {
-    if (this.menu && this.menu.input) { this.menu.input.ed.insert(t.replace(/\n/g, ' ')); return this.dirty(); }
+    const asKey = F.guess(t);
+    if (asKey && !(this.menu && this.menu.input && this.menu.input.secret)) {
+      if (this.menu && this.menu.input) this.menuBack();
+      this.plantFree(asKey, t.trim()).catch(() => {});
+      return this.dirty();
+    }
+    const page = this.menu && this.menu.stack[this.menu.stack.length - 1];
+    if (page && page.input) { page.input.ed.insert(t.replace(/\n/g, ' ')); return this.dirty(); }
     const paths = t.trim().split(/(?<!\\) (?=[/~])/).map((x) => x.trim().replace(/\\(.)/g, '$1').replace(/^'(.*)'$/, '$1'));
     const files = paths.every((x) => /^[/~]/.test(x) && x.length < 1024) ? paths.map((x) => { try { return S.attach(x); } catch { return null; } }) : [];
     if (files.length && files.every(Boolean)) { for (const f of files) this.attachFile(f); return this.dirty(); }
@@ -253,9 +279,9 @@ class App {
         onThought: (t) => { node.thought = (node.thought || '') + t; this.dirty(); },
         onSwitch: (next, why) => {
           node.thought = '';
-          Object.assign(node, { model: keyOf(next), name: next.name, provider: next.provider });
+          Object.assign(node, { model: keyOf(next), name: next.name, provider: next.provider, auto: F.isAuto(m) || undefined });
           this.jobs.set(node.id, { ac, model: next });
-          this.say(`${why.model.name} ${why.why}: asking ${next.name} instead…`, 5000);
+          if (why) this.say(`${why.model.name} ${why.why}: asking ${next.name} instead…`, 5000);
           this.dirty();
         },
       });
@@ -271,6 +297,7 @@ class App {
       }
     } finally {
       delete node.live;
+      this.meterAt = 0; // the usage line in the sidebar catches up
       node.took = Date.now() - started;
       this.jobs.delete(node.id);
       if (!this.jobs.size) this.react(node.err ? 'wilt' : 'bloom', node.err ? 4000 : R.length('bloom'));
@@ -402,9 +429,12 @@ class App {
       case 'pin': return this.pinFile(arg);
       case 'project': case 'projects': case 'p': return arg ? this.switchProject(arg) : this.openMenu(this.projectsMenu());
       case 'find': case 'search': return this.openMenu(this.findMenu(arg));
-      case 'usage': case 'stats': return this.openMenu(this.usageMenu());
-      case 'free': case 'local': return this.openMenu(this.freeMenu());
+      case 'usage': case 'stats': case 'limits': return this.openMenu(this.usageMenu());
+      case 'free': case 'setup': return this.openMenu(this.freeMenu());
+      case 'local': case 'offline': return this.openMenu(this.localMenu());
       case 'tidy': return this.openTidy();
+      case 'tools': return this.openMenu(this.toolsMenu());
+      case 'cram': case 'howto': return this.openMenu(this.toolsMenu());
       case 'sidebar': this.cfg.sidebar = this.cfg.sidebar === false; this.saveCfg(); return;
       case 'switch': case 'fallback': this.cfg.fallback = this.cfg.fallback === false; this.saveCfg(); return this.say(this.cfg.fallback ? 'If a model is busy or over its limit, the next one in your garden answers.' : "Models won't stand in for each other now.");
       case 'help': case '?': return this.openMenu(this.helpMenu());
@@ -551,6 +581,29 @@ class App {
     this.ui.suspend(() => spawnSync(exe, folder ? [folder] : [], { stdio: 'inherit', shell: process.platform === 'win32' })).then(() => { this.ui.prev = []; this.dirty(); });
   }
 
+  /** The little tools that use your free models. */
+  toolsMenu() {
+    const me = [process.execPath, path.join(__dirname, '..', 'bin', 'tot.js')];
+    const runTool = (args) => {
+      const { spawnSync } = require('child_process');
+      this.menu = null;
+      this.ui.suspend(() => {
+        spawnSync(me[0], [me[1], ...args], { stdio: 'inherit' });
+        if (args[0] === 'howto') { process.stdout.write('\n  Press Enter to go back to Tree of Thought.'); spawnSync(process.platform === 'win32' ? 'cmd' : 'sh', process.platform === 'win32' ? ['/c', 'pause >nul'] : ['-c', 'read _'], { stdio: 'inherit' }); }
+      }).then(() => { this.ui.prev = []; this.dirty(); });
+    };
+    return {
+      title: 'Tools',
+      note: 'Little helpers that use your free models. They also work straight from the terminal: tot cram, tot howto, tidy.',
+      items: [
+        { label: 'Tidy a folder', hint: 'tidy', desc: this.tidyPath() ? 'an AI that sorts a folder: plans first, only moves, undo' : 'an AI that sorts a folder (installs it first)', run: () => this.openTidy() },
+        { label: 'Make flashcards…', hint: 'tot cram', desc: 'from a file of notes, or a topic', run: () => this.pushPage(Object.assign(this.inputPage('Make flashcards', 'A file of notes (its path, or drag it in), or a topic like "the water cycle".', '', (v) => v.trim() && runTool(['cram', v.trim()])), {})) },
+        { label: 'Study my flashcards', hint: 'tot cram', desc: "what's due today", run: () => runTool(['cram']) },
+        { label: 'How do I… in the terminal?', hint: 'tot howto', desc: 'the command, explained; runs only if you say so', run: () => this.pushPage(this.inputPage('How do I…', 'Say what you want to do, like "unzip photos.zip" or "find big files here".', '', (v) => v.trim() && runTool(['howto', ...v.trim().split(/\s+/)]))) },
+      ],
+    };
+  }
+
   tidyMenu() {
     let site = '';
     try { site = fs.readFileSync(path.join(St.home(), 'hub'), 'utf8').trim(); } catch { /* from GitHub */ }
@@ -606,21 +659,22 @@ class App {
         { label: 'Attach a file…', hint: '/file', desc: this.files.length ? `${this.files.length} attached` : 'or drag one into this window', run: () => this.pushPage(this.inputPage('Attach a file', 'The path of a text or code file. It goes with your next question.', '', (v) => v.trim() && this.attachFile(v.trim()))) },
         { label: 'Save the last answer to a file', hint: '/save', run: () => this.saveAnswer('') },
         { label: 'Plant a model…', desc: 'add one to your garden', run: () => this.pushPage(this.plantMenu('')) },
-        { label: 'Get a free model for this computer…', hint: '/free', desc: 'no limits, no internet, private', run: () => this.pushPage(this.freeMenu()) },
+        { label: 'Set up free AI…', hint: '/free', desc: `${F.SERVICES.filter((x) => this.keys[x.id]).length} of ${F.SERVICES.filter((x) => !x.extra).length} free services · a minute each`, run: () => this.pushPage(this.freeMenu()) },
+        { label: 'Models on this computer…', hint: '/local', desc: 'optional: works offline, uses your computer', run: () => this.pushPage(this.localMenu()) },
         ...(m ? [{ label: `Remove ${m.name}`, run: () => this.uproot() }] : []),
         { label: 'API keys…', desc: Object.keys(this.keys).length ? Object.keys(this.keys).join(', ') : 'none yet', run: () => this.pushPage(this.keysMenu()) },
         { label: 'Instructions for every model…', desc: this.cfg.system ? 'set' : 'none', run: () => this.pushPage(this.systemMenu()) },
         { label: `${this.cfg.thoughts ? 'Hide' : 'Show'} the models' thinking`, run: () => this.command('thoughts') },
         { label: `Stand-ins: ${this.cfg.fallback === false ? 'off' : 'on'}`, desc: 'when a model is busy or over its limit, the next one answers', run: () => this.command('fallback') },
         { label: `${this.cfg.sidebar === false ? 'Show' : 'Hide'} the garden sidebar`, hint: 'ctrl+b', run: () => this.command('sidebar') },
-        { label: 'How much have I used?', hint: '/usage', run: () => this.pushPage(this.usageMenu()) },
+        { label: 'Usage: how much is left today?', hint: '/usage', desc: Me.line() || 'tracks your free services', run: () => this.pushPage(this.usageMenu()) },
         { label: 'Colours…', desc: Th.name(), run: () => this.pushPage(this.themeMenu()) },
         { label: 'Copy the last answer', hint: 'ctrl+y', run: () => this.copyAnswer(false) },
         { label: 'Save this chat as Markdown', run: () => this.exportChat() },
         { label: 'Delete this chat', run: () => this.deleteChat() },
         { label: 'Open the dashboard', desc: 'chats as trees, garden, keys, models on this computer', run: () => this.dashboard() },
         { label: 'Which services work on this network?', desc: 'for school or office Wi-Fi', run: () => this.networkPage() },
-        { label: 'Tidy a folder…', hint: '/tidy', desc: this.tidyPath() ? 'opens tidy, the folder-tidying AI' : 'tidy: an AI that tidies folders (not installed yet)', run: () => this.openTidy() },
+        { label: 'Tools…', desc: 'tidy a folder · flashcards · terminal help', run: () => this.pushPage(this.toolsMenu()) },
         { label: 'Help', run: () => this.pushPage(this.helpMenu()) },
         { label: 'Quit', hint: 'ctrl+d', run: () => this.quit() },
       ],
@@ -711,28 +765,84 @@ class App {
     return page;
   }
 
+  /** Usage: what each free service has left today, and what to do about it. */
   usageMenu() {
-    const rows = S.usage(St.chats.all());
+    const sum = Me.summary(this.garden, this.keys);
+    const tips = Me.tips(sum, this.keys);
     const n = (x) => (x >= 1e6 ? (x / 1e6).toFixed(1) + 'M' : x >= 1e3 ? (x / 1e3).toFixed(1) + 'k' : String(x));
-    const cost = rows.reduce((a, r) => a + r.cost, 0);
+    const items = sum.rows.map((r) => {
+      const left = r.left === null ? (r.perMinute ? `${r.perMinute} a minute, no daily limit` : 'no published limit') : `${r.exact ? '' : '~'}${r.left} left`;
+      const mark = r.state === 'out' ? '✗ ' : r.state === 'low' ? '! ' : '✓ ';
+      return { label: mark + r.name, desc: `${r.asked} asked today · ${n(r.tokens)} tokens · ${left}${r.refill && r.state !== 'ok' ? ` · refills ${Me.when(r.refill)}` : ''}`, plant: null, run: () => {} };
+    });
+    const rest = S.usage(St.chats.all()).filter((r) => !F.SERVICES.some((sv) => r.model.startsWith(sv.id + ':')));
+    for (const r of rest.slice(0, 8)) items.push({ label: '  ' + r.name, desc: `${r.answers} answers in all · ${n(r.in + r.out)} tokens${r.cost ? ` · $${r.cost.toFixed(4)}` : ''}`, run: () => {} });
+    items.push({ label: 'Set up more free AI…', desc: 'more services = more room every day', run: () => this.pushPage(this.freeMenu()) });
+    const week = sum.week.map((d) => d.asked);
+    const max = Math.max(1, ...week);
+    const spark = week.map((v) => '▁▂▃▄▅▆▇█'[Math.min(7, Math.round((v / max) * 7))]).join('');
     return {
-      title: 'How much you\'ve used',
-      note: rows.length ? `Words are counted in tokens (a token is about ¾ of a word).${cost ? ` Reported cost so far: $${cost.toFixed(4)}.` : ''} Models on this computer are always free.` : 'Nothing yet: ask something first.',
-      items: rows.map((r) => ({ label: r.name, desc: `${r.answers} answer${r.answers === 1 ? '' : 's'} · ${n(r.in)} in · ${n(r.out)} out${r.cost ? ` · $${r.cost.toFixed(4)}` : ''}`, plant: Pl.plantFor({ id: r.model.split(':').slice(1).join(':'), name: r.name, provider: r.model.split(':')[0] }), run: () => {} })),
+      title: 'Usage',
+      note: (sum.rows.length ? `${Me.line(sum)}.  last 7 days ${spark}\n` : '') + (tips.length ? tips.join('\n') : ''),
+      items,
     };
   }
 
-  /** Free, unlimited, private: a model that runs on this computer (through Ollama). */
+  /** Free AI in the cloud: one page, a line per service, a minute each. */
   freeMenu() {
+    const watching = F.canWatch();
+    const page = {
+      title: 'Set up free AI',
+      note: 'Free accounts with powerful models that run in the cloud (not on your computer). Pick one, make a free key on the page that opens, and click Copy: ' + (watching ? 'Tree of Thought notices by itself.' : 'then paste it here.') + ' The more you add, the more you can ask each day; Auto (free) spreads questions across them.',
+      items: [],
+    };
+    const fill = () => {
+      page.items = F.status(this.keys).map((sv) => ({
+        label: `${sv.done ? '✓' : ' '} ${sv.name}${sv.extra ? '  (extra)' : ''}`,
+        desc: sv.done ? `done · ${sv.allowance}` : `${sv.good} · ${sv.allowance}`,
+        keep: true,
+        run: () => this.pushPage(this.keyStep(sv, () => fill())),
+      }));
+    };
+    fill();
+    page.refresh = fill;
+    return page;
+  }
+
+  /** One service: open its key page, then wait for the key (copied or pasted). */
+  keyStep(sv, after) {
+    const page = this.inputPage(`${sv.name}: make a free key`, '', '', (v) => {
+      if (stop) stop();
+      if (v.trim()) this.plantFree(sv.id, v.trim()).then(after, () => {});
+    }, true);
+    page.input.stay = true;
+    const steps = sv.steps.map((x, i) => `${i + 1}. ${x}`).join('\n');
+    const watching = F.canWatch();
+    page.note = `Opening ${sv.keyUrl.replace(/^https:\/\//, '')} in your browser. Needs ${sv.needs}.\n${steps}\n${watching ? 'Tree of Thought is watching the clipboard (only on this step): copy the key and it\'s added. Or paste it below.' : 'Then paste it below and press Enter.'}`;
+    open(sv.keyUrl);
+    let stop = null;
+    if (watching) {
+      stop = F.watchClipboard(sv.id, (key) => {
+        stop = null;
+        if (this.menu && this.menu.stack[this.menu.stack.length - 1] === page) this.menuBack();
+        this.plantFree(sv.id, key).then(() => { after(); this.dirty(); }, () => {});
+      });
+      page.onLeave = () => { if (stop) stop(); };
+    }
+    return page;
+  }
+
+  /** Optional: a model that runs on this computer (through Ollama). Works offline; uses your computer. */
+  localMenu() {
     const { memoryGB, picks } = S.localPicks();
-    const page = { title: 'Free models for this computer', loading: true, items: [], note: 'Checking for Ollama…' };
+    const page = { title: 'Models on this computer', loading: true, items: [], note: 'Checking for Ollama…' };
     P.ollamaModels().then((have) => {
       page.loading = false;
       if (!have) {
-        page.note = 'Models on your own computer are free with no limits, private, and work without internet. They need Ollama, a free app:';
+        page.note = 'Optional. Models that run on your own computer work without internet and keep everything private, but they use your computer and are smaller than the cloud ones (Tab → Set up free AI). They need Ollama, a free app:';
         page.items = [
           { label: '1. Download Ollama', desc: 'ollama.com/download (opens your browser)', keep: true, run: () => { open('https://ollama.com/download'); this.say('Install it like any app, open it once, then come back here and pick step 2.', 8000); } },
-          { label: '2. I installed it: check again', keep: true, run: () => { const fresh = this.freeMenu(); this.menu.stack[this.menu.stack.length - 1] = fresh; } },
+          { label: '2. I installed it: check again', keep: true, run: () => { const fresh = this.localMenu(); this.menu.stack[this.menu.stack.length - 1] = fresh; } },
         ];
       } else {
         const got = new Set(have.map((m) => m.name));
@@ -782,9 +892,10 @@ class App {
       ['Ctrl+G', 'ask every model in your garden at once'], ['Ctrl+R', 'ask again'], ['Ctrl+E', 'edit your last question (new branch)'],
       ['Ctrl+Y', 'copy the last answer'], ['Ctrl+N', 'new chat'], ['Esc', 'stop an answer'], ['PgUp PgDn', 'scroll'], ['Tab', 'this menu'],
       ['Ctrl+B', 'hide or show the garden sidebar'],
+      ['/free', 'set up free AI in the cloud (a minute per service)'], ['/usage', "what's left today on each free service"],
       ['/file path', 'attach a file to your next question (or drag it in)'], ['/project name', 'switch to (or make) a project'], ['/pin path', 'pin a file to the project'],
-      ['/save', 'save the last answer to a file (/save code x.py: just its code)'], ['/find words', 'search every chat'], ['/free', 'a free model for this computer'],
-      ['/usage', 'how much you\'ve used'], ['/tidy', 'open tidy, the folder-tidying AI'],
+      ['/save', 'save the last answer to a file (/save code x.py: just its code)'], ['/find words', 'search every chat'], ['/local', 'optional: a model on this computer'],
+      ['/tidy', 'open tidy, the folder-tidying AI'],
       ['/key openrouter …', 'save a key'], ['/model name', 'switch model'], ['/copy code', 'copy the last code block'], ['/system …', 'instructions for every model'],
     ];
     return { title: 'Keys', items: rows.map(([k, d]) => ({ label: k, desc: d, run: () => {} })) };
@@ -831,7 +942,7 @@ class App {
     if (page.input) {
       const ed = page.input.ed;
       if (k.name === 'escape') return this.menuBack();
-      if (k.name === 'return') { const v = ed.text; this.menuBack(); page.input.done(v); if (this.menu) this.menu = null; return; }
+      if (k.name === 'return') { const v = ed.text; this.menuBack(); page.input.done(v); if (this.menu && !page.input.stay) this.menu = null; return; }
       return this.editKey(ed, s, k);
     }
     const items = this.menuItems();
@@ -853,7 +964,10 @@ class App {
   }
 
   menuBack() {
-    this.menu.stack.pop();
+    const gone = this.menu.stack.pop();
+    if (gone && gone.onLeave) gone.onLeave();
+    const under = this.menu.stack[this.menu.stack.length - 1];
+    if (under && under.refresh) under.refresh();
     this.menu.index = 0;
     this.menu.filter = '';
     if (!this.menu.stack.length) this.menu = null;
@@ -880,7 +994,7 @@ class App {
       return this.dirty();
     }
     switch (k.name) {
-      case 'return': if (k.meta) this.ed.insert('\n'); else if (empty && this.cursor.kind === 'add') this.openMenu(this.plantMenu('')); else if (empty && this.cursor.kind === 'new') this.newChat(); else this.send(); break;
+      case 'return': if (k.meta) this.ed.insert('\n'); else if (empty && !this.garden.length) this.openMenu(this.freeMenu()); else if (empty && this.cursor.kind === 'add') this.openMenu(this.plantMenu('')); else if (empty && this.cursor.kind === 'new') this.newChat(); else this.send(); break;
       case 'tab': this.openMenu(this.mainMenu()); break;
       case 'escape':
         if (this.stop()) break;
@@ -1012,7 +1126,7 @@ class App {
     if (!this.ed.text && i === 0) {
       const ph = this.jobs.size ? 'growing an answer… (esc to stop)'
         : this.files.length ? `Ask about ${this.files.map((f) => f.name).join(', ')}…`
-          : m ? `Ask ${m.name}…  (tab for the menu)` : 'Press Tab → Get a free model, or add an API key';
+          : m ? `Ask ${F.isAuto(m) ? 'anything' : m.name}…  (tab for the menu)` : 'Press Enter to set up free AI, or paste a key';
       return ' ' + lead + Th.faint(ph);
     }
     return ' ' + lead + text;
@@ -1043,6 +1157,10 @@ class App {
     const sel = (s, on) => (on && s[0] === ' ' ? Th.leaf('›') + s.slice(1) : s);
 
     out.push(' ' + Th.leaf('GARDEN', { bold: true }) + Th.faint(this.garden.length ? `  ${this.garden.length}` : ''));
+    if (this.garden.some(F.isAuto)) {
+      if (!this.meterAt || Date.now() - this.meterAt > 15000) { this.meterAt = Date.now(); try { this.meterLine = Me.line(Me.summary(this.garden, this.keys)); } catch { this.meterLine = ''; } }
+      if (this.meterLine) out.push(' ' + Th.faint(A.clip(this.meterLine, w - 2)));
+    }
     if (!this.garden.length) {
       out.push(Th.dim('  nothing planted yet'));
       out.push(Th.dim('  tab → API keys'));
@@ -1204,14 +1322,12 @@ class App {
       body.push(center(Th.faint('quick question from any terminal: ') + Th.dim('tot what is osmosis?'), w - 1));
     } else {
       const lines = [
-        Th.bold('Plant your first model'), '',
-        Th.leaf('Free, with no limits') + Th.dim(' (runs on this computer, works offline):'),
-        '   Press ' + Th.bold('Tab') + ' → ' + Th.bold('Get a free model for this computer') + '.', '',
-        Th.leaf('The big ones') + Th.dim(' (Claude, GPT, Gemini, Grok…):'),
-        '   1. Get a key at ' + A.paint('https://openrouter.ai/keys', { fg: t.water, underline: true }),
-        '   2. Press ' + Th.bold('Tab') + ' → ' + Th.bold('API keys') + ' → ' + Th.bold('OpenRouter') + ', and paste it.',
-        '   Your garden fills with the strongest model from each maker.', '',
-        Th.dim('Google AI Studio and Groq keys are free too (with daily limits).'),
+        Th.bold('Plant your first models'), '',
+        Th.leaf('Free and powerful') + Th.dim(' (in the cloud, not on your computer):'),
+        '   Press ' + Th.bold('Enter') + '. Pick a service, make a free key on the page that opens,',
+        '   and click Copy. That\'s it: about a minute each.', '',
+        Th.leaf('Already have a key?') + Th.dim(' Just paste it here.'), '',
+        Th.dim('Claude and GPT need a paid key: Tab → API keys (OpenRouter is the easy one).'),
         Th.dim('Is a site blocked where you are? Tab → Which services work on this network?'),
       ];
       const cw = Math.max(...lines.map((x) => A.vwidth(x)));

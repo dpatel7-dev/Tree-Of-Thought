@@ -182,9 +182,10 @@ footer { margin-top: 3em; color: var(--faint); display: flex; gap: 2ch; flex-wra
 <nav class="tabs" aria-label="Sections">
   <button data-tab="chats">chats</button>
   <button data-tab="garden">garden</button>
-  <button data-tab="computer">free models</button>
+  <button data-tab="free">free AI</button>
   <button data-tab="projects">projects</button>
   <button data-tab="usage">usage</button>
+  <button data-tab="computer">this computer</button>
   <button data-tab="keys">keys</button>
   <button data-tab="network">network</button>
   <button data-tab="settings">settings</button>
@@ -266,7 +267,7 @@ footer { margin-top: 3em; color: var(--faint); display: flex; gap: 2ch; flex-wra
   function render() {
     var m = $('main');
     var keep = document.activeElement && document.activeElement.id && m.contains(document.activeElement) ? { id: document.activeElement.id, at: document.activeElement.selectionStart } : null;
-    var fn = { chats: chatsView, garden: gardenView, computer: computerView, projects: projectsView, usage: usageView, keys: keysView, network: networkView, settings: settingsView }[tab];
+    var fn = { chats: chatsView, garden: gardenView, free: freeView, computer: computerView, projects: projectsView, usage: usageView, keys: keysView, network: networkView, settings: settingsView }[tab];
     m.innerHTML = fn();
     paintPlants(m);
     if (wire[tab]) wire[tab]();
@@ -283,7 +284,7 @@ footer { margin-top: 3em; color: var(--faint); display: flex; gap: 2ch; flex-wra
   function askBox() {
     var m = S.garden.filter(function (x) { return x.current; })[0];
     var opts = S.garden.map(function (g) { var k = g.provider + ':' + g.id; return '<option value="' + esc(k) + '"' + (g.current ? ' selected' : '') + '>' + esc(g.name) + '</option>'; }).join('');
-    var inner = '<form class="bar" id="askForm"><span class="prompt">›</span><input class="field grow" id="askQ" placeholder="' + (m ? 'ask anything…' : 'plant a model first (free models: the free models tab)') + '" autocomplete="off"' + (m ? '' : ' disabled') + '>' +
+    var inner = '<form class="bar" id="askForm"><span class="prompt">›</span><input class="field grow" id="askQ" placeholder="' + (m ? 'ask anything…' : 'set up free AI first: the free AI tab') + '" autocomplete="off"' + (m ? '' : ' disabled') + '>' +
       (S.garden.length > 1 ? '<select class="field" id="askM" aria-label="Which model">' + opts + '</select>' : '') + '<button class="mini go" id="askGo"' + (m ? '' : ' disabled') + '>' + (asking && !asking.done ? 'stop' : 'ask') + '</button></form>';
     if (asking) {
       inner += '<div class="who">' + plantTag(asking.plant) + '<b>' + esc(asking.name) + '</b>' + (asking.maker ? ' · ' + esc(asking.maker) : '') + (asking.done && asking.chat ? '<span class="acts"><button class="mini" id="askMore">follow up</button><button class="mini" id="askOpen">open as a chat</button></span>' : '') + '</div>';
@@ -453,9 +454,9 @@ footer { margin-top: 3em; color: var(--faint); display: flex; gap: 2ch; flex-wra
     var c = S.computer;
     var have = {}; (ollama || []).forEach(function (m) { have[m.name] = m; });
     var planted = {}; S.garden.forEach(function (m) { planted[m.provider + ':' + m.id] = 1; });
-    var intro = '<p class="note">Models that run on your own computer are free with <b>no limits</b>, private (nothing leaves this computer), and work without internet, so no network can block them. They use Ollama, a free app.</p>';
-    if (ollama === undefined) return box('w12', 'free models', '', intro + '<p class="empty">Looking for Ollama…</p>');
-    if (ollama === null) return box('w12', 'free models', '<span class="pill warn">Ollama isn\'t running</span>', intro +
+    var intro = '<p class="note">Optional. Models that run on your own computer work without internet and keep everything private, but they use your computer\'s memory and are smaller than the free cloud ones (the <b>free AI</b> tab). They use Ollama, a free app.</p>';
+    if (ollama === undefined) return box('w12', 'this computer', '', intro + '<p class="empty">Looking for Ollama…</p>');
+    if (ollama === null) return box('w12', 'this computer', '<span class="pill warn">Ollama isn\'t running</span>', intro +
       '<ol class="md"><li>Download Ollama: <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a> (if that site is blocked where you are, do this at home)</li><li>Open it once. On a Mac a little llama appears at the top of the screen.</li><li>Come back and press <button class="mini go" id="olAgain">look again</button></li></ol>');
     var picks = c.picks.map(function (p, i) {
       var got = have[p.name];
@@ -525,20 +526,71 @@ footer { margin-top: 3em; color: var(--faint); display: flex; gap: 2ch; flex-wra
     $('pDel').onclick = function () { if (confirm('Delete the project "' + cur.name + '"? Its chats are kept.')) { openProject = null; pa({ action: 'delete', id: cur.id }); } };
   };
 
-  // ══ usage ══
+  // ══ free AI: a minute per service ══
+  var freeMsg = {};
+  function freeView() {
+    var done = S.free.filter(function (f) { return f.done; }).length;
+    var rows = S.free.map(function (f) {
+      var steps = '<ol class="md" style="margin:.4em 0 .6em">' + f.steps.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ol>';
+      return '<div class="seed" style="grid-template-columns:2.4ch minmax(0,1fr) auto;align-items:start;padding:.8em 0">' +
+        '<span class="' + (f.done ? 'ok' : 'faint') + '" style="font-weight:700">' + (f.done ? '✓' : '·') + '</span>' +
+        '<div style="min-width:0"><b>' + esc(f.name) + '</b>' + (f.extra ? ' <span class="pill">extra</span>' : '') + '<span class="dim" style="display:block">' + esc(f.good) + '</span><small style="white-space:normal">' + esc(f.allowance) + ' · needs ' + esc(f.needs) + '</small>' +
+        (f.done ? '' : '<div data-open-steps="' + f.id + '" hidden>' + steps + '<form class="line" data-freeform="' + f.id + '"><span class="prompt">›</span><input class="field grow" type="password" autocomplete="off" placeholder="paste the key here"><button class="mini go">add</button></form><div class="msg" id="fm-' + f.id + '">' + esc(freeMsg[f.id] || '') + '</div></div>') + '</div>' +
+        (f.done ? '<span class="pill ok">set up</span>' : '<button class="mini go" data-free="' + f.id + '" data-url="' + esc(f.keyUrl) + '">get a free key</button>') + '</div>';
+    }).join('');
+    return box('w12', 'free AI', done + ' of ' + S.free.filter(function (f) { return !f.extra; }).length + ' set up',
+      '<p class="note">Powerful models that run in the cloud, for free: each service gives you a daily allowance once you make a free key (no card). Press <b>get a free key</b>, make one on the page that opens, copy it, and paste it here. The more you add, the more you can ask each day: <b>Auto (free)</b> sends each question to the best one with room left. One account per service, please: extra accounts break their rules.</p><div class="rows seeds">' + rows + '</div>');
+  }
+  wire.free = function () {
+    document.querySelectorAll('[data-free]').forEach(function (b) {
+      b.onclick = function () {
+        window.open(b.dataset.url, '_blank', 'noopener');
+        var box2 = document.querySelector('[data-open-steps="' + b.dataset.free + '"]');
+        if (box2) { box2.hidden = false; var i = box2.querySelector('input'); if (i) i.focus(); }
+        b.textContent = 'page opened';
+      };
+    });
+    document.querySelectorAll('[data-freeform]').forEach(function (f) {
+      f.onsubmit = function (e) {
+        e.preventDefault();
+        var id = f.dataset.freeform, input = f.querySelector('input'), msg = $('fm-' + id);
+        if (!input.value.trim()) { msg.className = 'msg bad'; msg.textContent = 'Paste the key first.'; return; }
+        msg.className = 'msg'; msg.textContent = 'Checking it…';
+        api('free', { body: { provider: id, key: input.value.trim() } }).then(function (st) { S = st; freeMsg[id] = ''; models = null; render(); }, function (er) { msg.className = 'msg bad'; msg.textContent = er.message; });
+      };
+    });
+  };
+
+  // ══ usage: what's left today ══
   function usageView() {
     if (!usage) return box('w12', 'usage', '', '<p class="empty">Adding it up…</p>');
-    if (!usage.length) return box('w12', 'usage', '', '<p class="empty">Nothing yet: ask something first.</p>');
-    var max = Math.max.apply(null, usage.map(function (r) { return r.in + r.out; })) || 1;
-    var cost = usage.reduce(function (a, r) { return a + r.cost; }, 0);
-    var answers = usage.reduce(function (a, r) { return a + r.answers; }, 0);
-    var rows = usage.map(function (r) {
-      var plant = (S.garden.filter(function (g) { return g.provider + ':' + g.id === r.model; })[0] || {}).plant;
-      return '<tr><td>' + plantTag(plant || (r.model.indexOf('ollama:') === 0 ? 'acorn' : 'sprout')) + ' ' + esc(r.name) + '</td><td>' + r.answers + '</td><td>' + num(r.in) + '</td><td>' + num(r.out) + '</td><td>' + (r.cost ? '$' + r.cost.toFixed(4) : r.model.indexOf('ollama:') === 0 ? 'free' : '-') + '</td><td class="tbar">' + textBar((r.in + r.out) / max, 24) + '</td></tr>';
-    }).join('');
-    return box('w12', 'usage', answers + ' answers' + (cost ? ' · $' + cost.toFixed(4) + ' reported' : ''),
-      '<p class="note">Counted in tokens (a token is about ¾ of a word). Services that report a cost (OpenRouter does) show it; models on this computer are always free.</p><table><thead><tr><th>model</th><th>answers</th><th>tokens in</th><th>out</th><th>cost</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>');
+    var mt = usage.meter, html = '';
+    if (mt.rows.length) {
+      var max = Math.max.apply(null, mt.week.map(function (d) { return d.asked; }).concat([1]));
+      var spark = mt.week.map(function (d) { return '▁▂▃▄▅▆▇█'[Math.min(7, Math.round(d.asked / max * 7))]; }).join('');
+      var rows = mt.rows.map(function (r) {
+        var cap = r.left === null ? null : r.left + r.asked;
+        var bar = cap ? textBar(r.left / Math.max(1, cap), 20) : '<span class="faint">' + (r.perMinute ? r.perMinute + ' a minute, no daily limit' : 'no published limit') + '</span>';
+        var state = r.state === 'out' ? '<span class="pill no">used up</span>' : r.state === 'low' ? '<span class="pill warn">low</span>' : '<span class="pill ok">ok</span>';
+        return '<tr><td>' + esc(r.name) + '</td><td>' + state + '</td><td>' + r.asked + '</td><td>' + num(r.tokens) + '</td><td class="tbar">' + bar + '</td><td class="dim">' + (r.left === null ? '' : (r.exact ? '' : '~') + r.left + ' left' + (r.exact ? '' : ' (estimate)')) +
+          (r.resting.length ? '<br>' + r.resting.map(function (z) { return esc(z.name) + ' rests until ' + new Date(z.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); }).join('<br>') : '') + '</td></tr>';
+      }).join('');
+      html += box('w8', 'free services today', esc(usage.line), '<table><thead><tr><th>service</th><th></th><th>asked</th><th>tokens</th><th>left today</th><th></th></tr></thead><tbody>' + rows + '</tbody></table><p class="note" style="margin-top:1em">Numbers marked ~ are estimates from each service\'s published allowance; the rest are what the service itself reported after your last question. Most refill at midnight UTC (7 pm in New York in winter).</p>');
+      html += '<div class="stack w4">' + box('', 'last 7 days', '', '<div class="tbar" style="font-size:1.8em;letter-spacing:.1em">' + spark + '</div><div class="dim" style="display:flex;justify-content:space-between"><span>' + esc(mt.week[0].day.slice(5)) + '</span><span>today</span></div>') +
+        box('', 'helper', '', usage.tips.length ? '<ul class="md" style="margin:0">' + usage.tips.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>' : '<p class="note">All good.</p>') + '</div>';
+    } else {
+      html += box('w12', 'free services today', '', '<p class="note">No free services set up yet. <button class="mini go" data-go-free>set up free AI</button> takes about a minute each.</p>');
+    }
+    var all = usage.models;
+    if (all.length) {
+      var top = Math.max.apply(null, all.map(function (r) { return r.in + r.out; })) || 1;
+      html += box('w12', 'every model, all time', '', '<table><thead><tr><th>model</th><th>answers</th><th>tokens in</th><th>out</th><th>cost</th><th></th></tr></thead><tbody>' + all.map(function (r) {
+        return '<tr><td>' + esc(r.name) + '</td><td>' + r.answers + '</td><td>' + num(r.in) + '</td><td>' + num(r.out) + '</td><td>' + (r.cost ? '$' + r.cost.toFixed(4) : '-') + '</td><td class="tbar">' + textBar((r.in + r.out) / top, 20) + '</td></tr>';
+      }).join('') + '</tbody></table>');
+    }
+    return html;
   }
+  wire.usage = function () { var b = document.querySelector('[data-go-free]'); if (b) b.onclick = function () { go('free'); }; };
 
   // ══ keys ══
   function keysView() {
@@ -606,7 +658,7 @@ footer { margin-top: 3em; color: var(--faint); display: flex; gap: 2ch; flex-wra
     $('ver').textContent = 'v' + s.version;
     applyTheme();
     var h = location.hash.slice(1);
-    go(['chats', 'garden', 'computer', 'projects', 'usage', 'keys', 'network', 'settings'].indexOf(h) >= 0 ? h : 'chats');
+    go(['chats', 'garden', 'free', 'computer', 'projects', 'usage', 'keys', 'network', 'settings'].indexOf(h) >= 0 ? h : (S.garden.length ? 'chats' : 'free'));
     api('chats').then(function (l) { chatList = l; if (l.length && !chat) openChat(l[0].id); });
   }, function (e) { $('main').innerHTML = '<p class="empty">' + esc(e.message) + '</p>'; });
 })();

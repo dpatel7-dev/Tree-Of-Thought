@@ -55,23 +55,46 @@ The answer prints right there. Ask a follow-up, or press Enter to finish. Every
 quick question is saved as a chat, so it's in your garden later. The dashboard
 has the same quick-question bar at the top.
 
-## Free, with no limits
+## Free AI, set up in a minute
 
-Models that run on **your own computer** are free, have no limits at all, keep
-everything private and work without internet (so no network can block them):
+Lots of AI services give you a free allowance once you make a free account and
+a key (no card): Groq, NVIDIA, Google Gemini, Mistral, OpenRouter, Ollama Cloud
+and more (the [awesome-freellm-apis](https://github.com/open-free-llm-api/awesome-freellm-apis)
+list keeps track of them). The models run on their computers, not yours, and
+include big ones like DeepSeek, Kimi K2, GPT-OSS 120B, Qwen3 Coder, Gemini Flash
+and Mistral Large.
 
-1. Install [Ollama](https://ollama.com/download) (a free app) and open it once.
-2. Run `tot free` (or **Tab → Get a free model for this computer**).
+```sh
+tot free
+```
 
-Tree of Thought checks how much memory your computer has and downloads the
-model that fits it best (for example `gemma3:4b` on an 8 GB Mac, `qwen3:8b` on
-16 GB, `gpt-oss:20b` on 32 GB).
+For each service, a page opens; sign in, make a key and click **Copy**. Tree
+of Thought notices the copied key by itself (or paste it), checks it, and
+plants that service's best free models. You can also just paste a key into
+`tot` (or run `tot gsk_…`), or use the dashboard's **free AI** tab.
 
-There's no honest way to use Claude or GPT for free without limits: online
-services always have limits or cost money, and "free unlimited" sites that pass
-your questions through someone else's account are borrowing access they don't
-own (and can read everything you send). So Tree of Thought does the next best
-thing: **stand-ins** (below), plus models on your computer that never run out.
+**Auto (free)** becomes your default: for every question it picks the best
+free model that still has room today, a fast one for quick questions and a
+coding one for code, and moves on when one runs out. Each service has its own
+limits, but together they add up to a lot. (Claude and GPT themselves aren't
+free anywhere; for those you need a paid key, under **Tab → API keys**.)
+
+One account per service: making extra accounts to get more free use breaks
+their rules (and Groq, for one, counts limits per organisation anyway).
+
+### Usage
+
+`tot usage` (or **Tab → Usage**, or the dashboard's **usage** tab) shows what
+each free service has left today, using the numbers the services send back
+after every answer, when it refills, which models are resting after hitting a
+limit, the last seven days, and tips like which service to add next. The
+garden shows a one-line summary too ("today: 23 asked · plenty left").
+
+### Models on this computer (optional)
+
+`tot local` downloads a model to run on your own computer with
+[Ollama](https://ollama.com/download). It works offline and keeps everything
+private, but it uses your computer and is smaller than the cloud models.
 
 ## Plant your first models
 
@@ -119,9 +142,9 @@ Some networks block some AI services (or the websites where you get their keys).
 
 If the model you asked is busy, over its limit (free tiers have daily limits),
 out of credit or can't be reached, the next model in your garden answers
-instead, and you're told who stepped in ("Claude hit its limit, so qwen3:8b
-answered instead"). Models on your own computer are tried first, since they
-never run out. The busy model rests for ten minutes. Turn it off in **Tab →
+instead, and you're told who stepped in ("Claude hit its limit, so DeepSeek
+answered instead"). Free cloud models are tried first. A model that hit its
+daily limit rests until it refills. Turn it off in **Tab →
 Stand-ins** or the dashboard's settings.
 
 ## For long projects
@@ -139,8 +162,13 @@ Stand-ins** or the dashboard's settings.
   the oldest messages (after your first) are left out, and you're told.
 - **Usage**: `/usage` or `tot usage` shows how much you've used each model.
 - **Ctrl+B** hides the garden for more room.
-- **tidy**: **Tab → Tidy a folder** opens [tidy](https://github.com/dpatel7-dev/tidy),
-  the AI that tidies a folder for you.
+- **Tools** (Tab → Tools): little helpers that use your free models:
+  - `tot cram notes.md` makes flashcards from your notes (or a topic) and quizzes
+    you right in the terminal, bringing cards back less often as you learn them.
+  - `tot howto unzip photos.zip` gives the terminal command for what you want and
+    explains every part. Nothing runs unless you say so; risky commands need a
+    typed "yes", and a few (wiping disks, deleting your home folder) are refused.
+  - [tidy](https://github.com/dpatel7-dev/tidy), the AI that tidies a folder.
 
 ## The dashboard
 

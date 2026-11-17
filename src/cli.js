@@ -17,8 +17,14 @@ const HELP = `
   tot what is osmosis?         a quick answer right here (then ask follow-ups, or Enter to finish)
   tot -m gemini "question"     ...from a model in your garden, by name
   tot -f notes.md "summarise"  ...with a file attached (or pipe one in: cat x.py | tot explain this)
-  tot free                     get a free model that runs on this computer (no limits, works offline)
-  tot usage                    how much you've used each model
+  tot free                     set up free AI in the cloud: a minute per service, as easy as copy and paste
+  tot usage                    how much each free service has left today, and tips
+  tot local                    optional: a model on this computer (works offline, uses your computer)
+
+  Little tools (they use your free models):
+  tot cram notes.md            flashcards made from your notes (or a topic), studied right here
+  tot howto unzip a file       the terminal command for what you want, explained; runs only if you say so
+  tot tidy ~/Downloads         an AI that tidies a folder (a separate app: installs if needed)
   tot key <service> <key>      save an API key (${P.IDS.filter((i) => i !== 'ollama' && i !== 'custom').join(', ')})
   tot keys                     which keys are saved
   tot garden                   the models in your garden
@@ -87,6 +93,7 @@ async function main(argv) {
     case 'key': {
       const [id, ...k] = rest;
       if (!P.PROVIDERS[id] || !k.length) throw new Error(`Usage: tot key <${P.IDS.join('|')}> <your key>`);
+      if (require('./free').byId(id)) return addFreeKey(id, k.join(''), cfg);
       St.keys.set(id, k.join(''));
       out(`  Saved your ${P.PROVIDERS[id].name} key.`);
       if (!cfg.garden.some((m) => m.provider === id)) await plant(id, cfg);
@@ -132,8 +139,11 @@ async function main(argv) {
       return;
     }
     case 'ask': case 'q': return ask(rest, cfg);
-    case 'free': case 'local': return free(cfg);
-    case 'usage': case 'stats': return usage();
+    case 'free': case 'setup': return freeSetup(cfg, rest);
+    case 'cram': case 'flashcards': return require('./cram').main(rest);
+    case 'howto': case 'how': return require('./howto').main(rest);
+    case 'local': case 'offline': return free(cfg);
+    case 'usage': case 'stats': case 'limits': return usage();
     case 'tidy': {
       const { spawnSync } = require('child_process');
       const r = spawnSync('tidy', rest, { stdio: 'inherit', shell: process.platform === 'win32' });
@@ -143,6 +153,9 @@ async function main(argv) {
     case 'update': return update();
     case 'uninstall': return uninstall(rest.includes('--all'));
     default: {
+      // a pasted key on its own ("tot gsk_…"): add it
+      const F = require('./free');
+      if (argv.length === 1 && F.guess(cmd)) return addFreeKey(F.guess(cmd), cmd, cfg);
       // a near-miss of a command ("tot updte") gets a hint; anything else is a question
       const near = COMMANDS.find((c) => argv.length === 1 && cmd.length > 2 && !/\?$/.test(cmd) && close(cmd.toLowerCase(), c));
       if (near) throw new Error(`Did you mean: tot ${near}?   (To ask it as a question: tot ask ${cmd})`);
@@ -150,6 +163,13 @@ async function main(argv) {
       return ask(argv, cfg);
     }
   }
+}
+
+async function addFreeKey(id, key, cfg) {
+  const F = require('./free');
+  out(Th.dim(`  Checking your ${F.byId(id).name} key…`));
+  const { picked } = await F.addKey(id, key, cfg);
+  out(`  ${A.paint('✓', { fg: Th.t().ok })} Saved. Planted ${picked.map((m) => m.name).join(', ')}. Auto (free) is your default: try  tot what is a black hole?`);
 }
 
 async function plant(id, cfg) {
@@ -165,7 +185,7 @@ async function plant(id, cfg) {
   }
 }
 
-const COMMANDS = ['dashboard', 'check', 'pull', 'help', 'key', 'keys', 'garden', 'models', 'theme', 'ask', 'free', 'usage', 'update', 'uninstall', 'tidy', 'version'];
+const COMMANDS = ['dashboard', 'check', 'pull', 'help', 'key', 'keys', 'garden', 'models', 'theme', 'ask', 'free', 'setup', 'local', 'usage', 'update', 'uninstall', 'tidy', 'cram', 'howto', 'version'];
 function close(a, b) { // at most two typos apart
   if (Math.abs(a.length - b.length) > 2) return false;
   const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
@@ -206,7 +226,7 @@ async function ask(args, cfg) {
     const local = await P.ollamaHere();
     if (local && local.length) model = { provider: 'ollama', id: local[0].id, name: local[0].name };
   }
-  if (!model) throw new Error('Your garden is empty. For a free model on this computer: tot free   (or add a key: tot key openrouter <your key>)');
+  if (!model) throw new Error('Your garden is empty. Set up free AI in about a minute: tot free');
   const keys = St.keys.load();
   const chat = new St.Chat({ project: null });
   const live = process.stdout.isTTY;
@@ -228,13 +248,13 @@ async function ask(args, cfg) {
     chat.leaf = node.id;
     ac = new AbortController();
     stops = 0;
-    head(model);
+    if (model.provider !== 'auto') head(model);
     const started = Date.now();
     try {
       const r = await Ans.answer({
         model, garden: cfg.garden, keys, messages, system: cfg.system || undefined, signal: ac.signal, fallback: cfg.fallback !== false,
         onText: (t) => { node.text += t; process.stdout.write(t); },
-        onSwitch: (next, why) => { process.stderr.write(Th.dim(`  ${why.model.name} ${why.why}: asking ${next.name} instead…\n`)); head(next); },
+        onSwitch: (next, why) => { if (why) process.stderr.write(Th.dim(`  ${why.model.name} ${why.why}: asking ${next.name} instead…\n`)); head(next); },
       });
       Object.assign(node, { model: `${r.model.provider}:${r.model.id}`, name: r.model.name, provider: r.model.provider, usage: r.usage || undefined, took: Date.now() - started });
       model = r.model; // keep talking to whoever answered
@@ -270,7 +290,76 @@ function followUp() {
   });
 }
 
-/** Free, unlimited, offline: download the model that best fits this computer and plant it. */
+/**
+ * Free AI in the cloud, one service at a time: open its key page, wait for the
+ * key (copied, or pasted here), check it, plant its best free models.
+ */
+async function freeSetup(cfg, rest = []) {
+  const F = require('./free');
+  const keys = St.keys.load();
+  const only = rest[0] && F.byId(rest[0].toLowerCase());
+  const todo = only ? [only] : F.SERVICES.filter((sv) => !sv.extra || rest.includes('--all'));
+  const watching = F.canWatch();
+  const { open } = require('./tui');
+  const leaf = (x) => A.paint(x, { fg: Th.t().leaf, bold: true });
+  out(`\n  ${leaf('Free AI, in the cloud')}  ${Th.dim('(the models run on their computers, not yours)')}\n`);
+  out(Th.dim('  For each service: a page opens, you make a free key, and click Copy.'));
+  out(Th.dim(watching ? '  tot notices the copied key by itself. (Or paste it here.)' : '  Then paste it here and press Enter.'));
+  out(Th.dim('  Enter = set it up · s = skip · q = stop. The more you add, the more you can ask each day.\n'));
+  const rl = require('readline').createInterface({ input: process.stdin, output: process.stdout });
+  const lines = [];
+  let wake = null;
+  rl.on('line', (l) => { lines.push(l); if (wake) wake(); });
+  rl.on('close', () => { lines.push(null); if (wake) wake(); });
+  const nextLine = () => new Promise((res) => { if (lines.length) return res(lines.shift()); wake = () => { wake = null; res(lines.shift()); }; });
+  let added = 0;
+  try {
+    for (const sv of todo) {
+      const have = !!keys[sv.id];
+      out(`  ${have ? A.paint('✓', { fg: Th.t().ok }) : leaf('›')} ${A.paint(sv.name, { bold: true })}  ${Th.dim(sv.good)}`);
+      out(Th.dim(`    ${sv.allowance} · needs ${sv.needs}`));
+      if (have) { out(Th.dim('    already set up\n')); continue; }
+      process.stdout.write(Th.dim('    Enter to set it up, s to skip: '));
+      const a = await nextLine();
+      if (a === null || /^q/i.test(a.trim())) break;
+      if (/^s/i.test(a.trim())) { out(''); continue; }
+      open(sv.keyUrl);
+      out(Th.dim(`    Opened ${sv.keyUrl}`));
+      sv.steps.forEach((x, i) => out(`      ${i + 1}. ${x}`));
+      process.stdout.write(Th.dim(`    ${watching ? 'Waiting for you to copy the key (or paste it here)…' : 'Paste the key here and press Enter:'} `));
+      for (;;) {
+        const got = await new Promise((resolve) => {
+          let stop = () => {};
+          if (watching) stop = F.watchClipboard(sv.id, (k) => { resolve({ key: k, copied: true }); });
+          nextLine().then((l) => { stop(); resolve({ key: l, copied: false }); });
+        });
+        const key = got.key;
+        if (key === null) return;
+        if (got.copied) out(A.paint('got it', { fg: Th.t().ok }));
+        if (!key.trim() || /^s/i.test(key.trim())) { out(''); break; }
+        try {
+          out(Th.dim('    Checking it…'));
+          const { picked, cfg: c } = await F.addKey(sv.id, key.trim(), cfg);
+          Object.assign(cfg, c);
+          keys[sv.id] = key.trim();
+          added++;
+          out(`    ${A.paint('✓', { fg: Th.t().ok })} ${sv.name} works. Planted: ${picked.map((m) => m.name).join(', ')}\n`);
+          break;
+        } catch (e) {
+          out(Th.err(`    ${e.message}`));
+          process.stdout.write(Th.dim('    Try again (copy or paste the key), or s to skip: '));
+        }
+      }
+    }
+  } finally { rl.close(); }
+  const n = F.SERVICES.filter((sv) => keys[sv.id]).length;
+  if (n) {
+    out(`\n  ${leaf('Auto (free)')} is your default now: it sends each question to the best free model with room left`);
+    out(Th.dim(`  (${n} free service${n === 1 ? '' : 's'} set up${added ? `, ${added} just now` : ''}). Try it:  tot why is the sky blue?   ·   tot usage shows what's left.\n`));
+  } else out(Th.dim('\n  Nothing set up yet. Run tot free again any time.\n'));
+}
+
+/** Optional: download a model to run on this computer (works offline; uses your computer). */
 async function free(cfg) {
   const S = require('./smart');
   const have = await P.ollamaModels();
@@ -310,12 +399,29 @@ async function free(cfg) {
 
 function usage() {
   const S = require('./smart');
-  const rows = S.usage(St.chats.all());
-  if (!rows.length) { out('  Nothing used yet.'); return; }
+  const Me = require('./meter');
+  const sum = Me.summary();
   const n = (x) => (x >= 1e6 ? (x / 1e6).toFixed(1) + 'M' : x >= 1e3 ? (x / 1e3).toFixed(1) + 'k' : String(x));
-  out(Th.dim('\n  ' + 'model'.padEnd(34) + 'answers'.padStart(8) + 'tokens in'.padStart(12) + 'out'.padStart(10) + 'cost'.padStart(10)));
+  if (sum.rows.length) {
+    const max = Math.max(1, ...sum.week.map((d) => d.asked));
+    const spark = sum.week.map((d) => '▁▂▃▄▅▆▇█'[Math.min(7, Math.round((d.asked / max) * 7))]).join('');
+    out(`\n  ${A.paint('Free services today', { bold: true })}  ${Th.dim(Me.line(sum))}  ${Th.dim('last 7 days')} ${A.paint(spark, { fg: Th.t().leaf })}\n`);
+    for (const r of sum.rows) {
+      const col = r.state === 'out' ? Th.t().err : r.state === 'low' ? Th.t().warn : Th.t().ok;
+      const mark = A.paint(r.state === 'out' ? '✗' : r.state === 'low' ? '!' : '✓', { fg: col });
+      const left = r.left === null ? (r.perMinute ? `${r.perMinute}/minute, no daily limit` : 'no published limit') : `${r.exact ? '' : '~'}${r.left} left${r.exact ? ' (the service says)' : ''}`;
+      out(`  ${mark} ${r.name.padEnd(15)} ${String(r.asked).padStart(4)} asked  ${n(r.tokens).padStart(6)} tokens   ${Th.dim(left)}${r.refill && r.state !== 'ok' ? Th.dim(` · refills ${Me.when(r.refill)}`) : ''}`);
+      for (const z of r.resting) out(Th.dim(`      ${z.name} is resting (refills ${Me.when(z.until)})`));
+    }
+    out('');
+  }
+  for (const t of Me.tips(sum)) out('  ' + A.paint('› ', { fg: Th.t().leaf }) + t);
+  const rows = S.usage(St.chats.all());
+  if (!rows.length) { out(''); return; }
+  out(Th.dim('\n  Every model, all time:'));
+  out(Th.dim('  ' + 'model'.padEnd(34) + 'answers'.padStart(8) + 'tokens in'.padStart(12) + 'out'.padStart(10) + 'cost'.padStart(10)));
   for (const r of rows) out(`  ${r.name.slice(0, 33).padEnd(34)}${String(r.answers).padStart(8)}${n(r.in).padStart(12)}${n(r.out).padStart(10)}${(r.cost ? '$' + r.cost.toFixed(4) : '-').padStart(10)}`);
-  out(Th.dim('\n  A token is about three quarters of a word. Models on this computer are always free.\n'));
+  out(Th.dim('\n  A token is about three quarters of a word.\n'));
 }
 
 function installUrl(kind) {

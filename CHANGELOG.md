@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.0
+- Free AI in the cloud, as easy as copy and paste: `tot free` (or Tab → Set up free AI, or the dashboard) opens each service's key page and notices the key when you copy it. Groq, NVIDIA, Google Gemini, Mistral, OpenRouter, Ollama Cloud and SambaNova, with their best free models (DeepSeek, Kimi K2, GPT-OSS 120B, Qwen3, Gemini, Mistral Large…).
+- Auto (free): picks the best free model with room left for every question (fast ones for quick questions, coding ones for code) and moves on when one runs out.
+- Usage tracker: `tot usage`, Tab → Usage and the dashboard show what each free service has left today (from the services' own numbers), when it refills, the last week, and tips.
+- Paste a key anywhere (or `tot gsk_…`) and it's added.
+- Models on this computer are now optional (`tot local`); stand-ins prefer free cloud models.
+- Tools: `tot cram` (flashcards from your notes) and `tot howto` (terminal commands explained, never run without asking), plus tidy, under Tab → Tools.
+
 ## 2.0.0
 - Quick questions: `tot what is osmosis?` answers right in your terminal, with follow-ups, files (`-f`) and piping. Saved as chats.
 - Free with no limits: `tot free` (or Tab → Get a free model for this computer) picks the model that fits your computer's memory and downloads it with Ollama.

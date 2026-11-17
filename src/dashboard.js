@@ -18,6 +18,8 @@ const R = require('./rowan');
 const Th = require('./theme');
 const S = require('./smart');
 const Ans = require('./answer');
+const F = require('./free');
+const Me = require('./meter');
 const { open: openThing } = require('./tui');
 const pkg = require('../package.json');
 
@@ -33,6 +35,7 @@ function state() {
     settings: { theme: cfg.theme, system: cfg.system || '', thoughts: !!cfg.thoughts, customBase: cfg.customBase || '', fallback: cfg.fallback !== false },
     garden: (cfg.garden || []).map((m, i) => ({ ...m, plant: Pl.plantFor(m), maker: S.makerOf(m), current: i === (cfg.current || 0) })),
     projects: (cfg.projects || []).map((p) => ({ ...p, files: p.files || [] })),
+    free: F.status(keys).map(({ id, name, good, needs, allowance, steps, keyUrl, done, extra }) => ({ id, name, good, needs, allowance, steps, keyUrl, done, extra: !!extra })),
     project: cfg.project || null,
     computer: (() => { const c = S.localPicks(); c.picks = c.picks.map((x) => ({ ...x, plant: Pl.plantFor({ id: x.name, provider: 'ollama' }) })); return c; })(),
     providers: P.IDS.map((id) => ({ id, ...P.PROVIDERS[id], hasKey: !!keys[id] })),
@@ -88,7 +91,15 @@ async function route(req, res, rest) {
     return send({ id: chat.id, title: chat.title, created: chat.created, updated: chat.updated, leaf: chat.leaf, project: chat.project, nodes });
   }
   if (rest === '/api/models') return send(await allModels(/[?&]fresh/.test(req.url)));
-  if (rest === '/api/usage') return send(S.usage(St.chats.all()));
+  if (rest === '/api/usage') { const sum = Me.summary(); return send({ meter: sum, line: Me.line(sum), tips: Me.tips(sum), models: S.usage(St.chats.all()) }); }
+  if (rest === '/api/free' && m === 'POST') {
+    const b = await body(req);
+    const id = String(b.provider || '');
+    if (!F.byId(id)) return send({ error: 'Unknown service.' }, 400);
+    try { await F.addKey(id, String(b.key || '')); } catch (e) { return send({ error: e.message }, 400); }
+    modelCache.at = 0;
+    return send(state());
+  }
   if (rest === '/api/search') return send(St.chats.search(new URL(req.url, 'http://x').searchParams.get('q') || '').slice(0, 50));
   if (rest === '/api/projects' && m === 'POST') {
     const b = await body(req);
@@ -135,7 +146,8 @@ async function route(req, res, rest) {
       const r = await Ans.answer({
         model, garden, keys: St.keys.load(), messages, system: cfg.system || undefined, signal: ac.signal, fallback: cfg.fallback !== false,
         onText: (t) => { node.text += t; out({ type: 'text', t }); },
-        onSwitch: (next, why) => out({ type: 'switch', from: why.model.name, why: why.why, name: next.name, maker: S.makerOf(next), plant: Pl.plantFor(next) }),
+        onSwitch: (next, why) => out(why ? { type: 'switch', from: why.model.name, why: why.why, name: next.name, maker: S.makerOf(next), plant: Pl.plantFor(next) }
+          : { type: 'model', name: next.name, maker: S.makerOf(next), plant: Pl.plantFor(next), chat: chat.id }),
       });
       Object.assign(node, { model: keyOf(r.model), name: r.model.name, provider: r.model.provider, usage: r.usage || undefined, took: Date.now() - started });
       if (r.tried.length) node.note = Ans.switchNote(r.tried, r.model);

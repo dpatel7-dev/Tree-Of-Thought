@@ -72,6 +72,11 @@ const P = {
     ink: { R: '#d64560', r: '#9e2a42', S: '#5aa354' },
     grid: ['.RRR..', 'RrRrR.', '.RRR..', '..S.S.', '.SS...', '..S...'],
   },
+  clover: {
+    about: 'four-leaf clover (Auto: free, and lucky)',
+    ink: { C: '#4fc16b', c: '#2f8a46', s: '#6a8a3a' },
+    grid: ['.CC.CC', 'CCcCCc', '.cCCc.', 'CCcCCc', '.CC.CC', '...s..'],
+  },
   sprout: {
     about: 'sprout',
     ink: { G: '#8fd16a', g: '#5c9c45', s: '#9a7350' },
@@ -96,6 +101,7 @@ const RULES = [
 ];
 
 function plantFor(model) {
+  if (model.provider === 'auto') return 'clover';
   const text = `${model.id || ''} ${model.name || ''}`;
   for (const [re, name] of RULES) if (re.test(text)) return name;
   if (model.provider === 'ollama') return 'acorn';

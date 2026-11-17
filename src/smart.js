@@ -19,6 +19,7 @@ const keyOf = (m) => `${m.provider}:${m.id}`;
 
 // ── who made it ───────────────────────────────────────────────────────────────
 const MAKERS = [
+  [/^auto$/i, ''],
   [/claude|anthropic/i, 'Anthropic'],
   [/gpt-oss|gpt|openai|\bo[1-9]\b|o\d-|chatgpt/i, 'OpenAI'],
   [/gemini|gemma|google/i, 'Google'],
@@ -65,16 +66,16 @@ function rest(m, ms = 10 * 60 * 1000) {
 const isResting = (m) => (resting.get(keyOf(m)) || 0) > Date.now();
 
 /**
- * Who to ask instead of `failed`: the rest of the garden, starting after it,
- * models that are resting last, models on this computer first among equals
- * (they have no limits). Never the same model twice.
+ * Who to ask instead of `failed`: the rest of the garden, starting after it.
+ * Free cloud models come first (they cost nothing and don't use your
+ * computer), models that are resting come last. Never the same model twice.
  */
 function fallbacks(garden, failed, tried = []) {
   loadResting();
   const seen = new Set([keyOf(failed), ...tried.map(keyOf)]);
   const i = garden.findIndex((m) => keyOf(m) === keyOf(failed));
-  const order = [...garden.slice(i + 1), ...garden.slice(0, Math.max(0, i))].filter((m) => !seen.has(keyOf(m)));
-  const score = (m) => (isResting(m) ? 2 : 0) + (m.provider === 'ollama' ? 0 : 1);
+  const order = [...garden.slice(i + 1), ...garden.slice(0, Math.max(0, i))].filter((m) => !seen.has(keyOf(m)) && m.provider !== 'auto');
+  const score = (m) => (isResting(m) ? 4 : 0) + (m.free && m.provider !== 'ollama' ? 0 : m.provider === 'ollama' ? 2 : 1);
   return order.map((m, n) => ({ m, n })).sort((a, b) => score(a.m) - score(b.m) || a.n - b.n).map((x) => x.m);
 }
 
@@ -152,7 +153,11 @@ const MAX_FILE = 200 * 1024;
 function attach(p, cwd = process.cwd()) {
   const full = path.resolve(cwd, String(p || '').replace(/^~(?=$|\/|\\)/, os.homedir()).replace(/^["']|["']$/g, ''));
   let st;
-  try { st = fs.statSync(full); } catch { throw new Error(`There's no file at ${full}`); }
+  try { st = fs.statSync(full); } catch {
+    const plain = full.replace(/\\(.)/g, '$1'); // a path dragged into the terminal: "My\ Notes.md"
+    if (plain !== full) return attach(plain, cwd);
+    throw new Error(`There's no file at ${full}`);
+  }
   if (st.isDirectory()) throw new Error(`${path.basename(full)} is a folder. Attach the files inside it one at a time.`);
   if (st.size > MAX_FILE) throw new Error(`${path.basename(full)} is ${Math.round(st.size / 1024)} KB: too big to send (the limit is ${MAX_FILE / 1024} KB).`);
   const buf = fs.readFileSync(full);
