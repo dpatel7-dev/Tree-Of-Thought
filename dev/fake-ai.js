@@ -57,6 +57,7 @@ function start(port = 0, { delay = 8 } = {}) {
       seen.push({ url: req.url, body: j, headers: req.headers });
       const msgs = j.messages || [];
       const q = String((msgs.filter((m) => m.role === 'user').pop() || {}).content || '');
+      if (/busy/i.test(q) && /opus/i.test(j.model || '')) { res.writeHead(429, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { message: 'Rate limit exceeded: free-models-per-day' } })); }
       const text = answerFor(j.model || '', q);
       if (text === null) { res.writeHead(500, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { message: 'the model fell over' } })); }
       res.writeHead(200, { 'content-type': 'text/event-stream' });

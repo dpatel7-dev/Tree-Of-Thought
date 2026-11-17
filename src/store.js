@@ -27,7 +27,7 @@ function writeJson(file, value, mode) {
   if (mode) try { fs.chmodSync(file, mode); } catch { /* windows */ }
 }
 
-const DEFAULTS = { garden: [], current: 0, theme: 'grove', system: '', thoughts: false, last: null };
+const DEFAULTS = { garden: [], current: 0, theme: 'grove', system: '', thoughts: false, last: null, projects: [], project: null, fallback: true, sidebar: true };
 
 const config = {
   load() { return { ...DEFAULTS, ...readJson(path.join(home(), 'config.json'), {}) }; },
@@ -54,6 +54,7 @@ class Chat {
     this.updated = data.updated || this.created;
     this.nodes = data.nodes || {}; // id -> { id, parent, role, text, model?, ts, err?, thought? }
     this.leaf = data.leaf || null; // the message at the end of the branch you're looking at
+    this.project = data.project || null; // the project this chat belongs to, if any
   }
 
   get empty() { return !Object.keys(this.nodes).length; }
@@ -111,7 +112,7 @@ class Chat {
   }
 
   toJSON() {
-    return { id: this.id, title: this.title, created: this.created, updated: this.updated, nodes: this.nodes, leaf: this.leaf };
+    return { id: this.id, title: this.title, created: this.created, updated: this.updated, nodes: this.nodes, leaf: this.leaf, project: this.project };
   }
 }
 
@@ -149,10 +150,33 @@ const chats = {
     const out = [];
     for (const f of files) {
       const c = readJson(path.join(chats.dir(), f), null);
-      if (c && c.id) out.push({ id: c.id, title: c.title || 'untitled', updated: c.updated || 0, messages: Object.keys(c.nodes || {}).length });
+      if (c && c.id) out.push({ id: c.id, title: c.title || 'untitled', updated: c.updated || 0, messages: Object.keys(c.nodes || {}).length, project: c.project || null });
     }
     return out.sort((a, b) => b.updated - a.updated);
   },
+};
+
+/** Every chat, fully loaded (for search and usage). */
+chats.all = function all() {
+  let files = [];
+  try { files = fs.readdirSync(chats.dir()).filter((f) => f.endsWith('.json')); } catch { return []; }
+  return files.map((f) => readJson(path.join(chats.dir(), f), null)).filter((c) => c && c.id);
+};
+
+/** Chats whose words include every word of `query`: [{ id, title, updated, hit }] (hit: a bit of text around the match). */
+chats.search = function search(query) {
+  const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const out = [];
+  for (const c of chats.all()) {
+    const texts = Object.values(c.nodes || {}).map((n) => n.text || '');
+    const all = (c.title + '\n' + texts.join('\n')).toLowerCase();
+    if (!words.every((w) => all.includes(w))) continue;
+    const t = texts.find((x) => x.toLowerCase().includes(words[0])) || c.title;
+    const at = Math.max(0, t.toLowerCase().indexOf(words[0]) - 30);
+    out.push({ id: c.id, title: c.title || 'untitled', updated: c.updated || 0, project: c.project || null, hit: t.slice(at, at + 90).replace(/\s+/g, ' ').trim() });
+  }
+  return out.sort((a, b) => b.updated - a.updated);
 };
 
 /** A conversation as Markdown (the branch on screen). */

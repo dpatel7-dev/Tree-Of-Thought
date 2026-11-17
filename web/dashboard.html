@@ -5,177 +5,227 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tree of Thought · dashboard</title>
 <link rel="icon" id="icon" href="data:,">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,400..800,100,1&family=Figtree:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
+/* Same family as gossip's dashboard: the terminal's own font and colours, panels
+   with their title cut into the border. Colours come from your tot theme. */
 :root {
-  --bg: #0e1611; --panel: #15211a; --panel-2: #1c2b22; --line: #2a3d30; --text: #dce7d6; --dim: #97ab93; --faint: #5d725f;
-  --leaf: #8fd16a; --blossom: #f2a7c3; --bark: #b88a62; --sun: #f2d16b; --water: #7cc6d6; --err: #ff7b72;
-  --serif: "Fraunces", "Iowan Old Style", Georgia, serif;
-  --sans: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --bg: #101812; --fg: #dce7d6; --dim: #7d907c; --faint: #4d6150; --border: #2c4131; --panel: #1a2a1f; --code: #152119;
+  --leaf: #8fd16a; --blossom: #f2a7c3; --bark: #b88a62; --sun: #f2d16b; --water: #7cc6d6; --err: #ff7b72; --warn: #f0b35a; --ok: #8fd16a;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; }
-body { background: var(--bg); color: var(--text); font: 15px/1.55 var(--sans); }
-a { color: var(--water); }
+html { background: var(--bg); }
+body {
+  margin: 0; padding: 1.4em 2.5ch 3em; color: var(--fg); max-width: 1500px; margin-inline: auto;
+  font: 14px/1.6 ui-monospace, "SF Mono", "JetBrains Mono", Menlo, "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--water); text-underline-offset: 2px; }
 button, input, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 :focus-visible { outline: 2px solid var(--sun); outline-offset: 2px; }
 [hidden] { display: none !important; }
-h1, h2, h3 { font-family: var(--serif); font-variation-settings: "SOFT" 100, "WONK" 1; font-weight: 650; letter-spacing: -.01em; margin: 0; }
-canvas.px { image-rendering: pixelated; display: block; }
+.dim { color: var(--dim); } .faint { color: var(--faint); } .ok { color: var(--ok); } .warn { color: var(--warn); } .err { color: var(--err); }
+.leaf { color: var(--leaf); } .blossom { color: var(--blossom); } .sun { color: var(--sun); }
+canvas.px { image-rendering: pixelated; display: inline-block; vertical-align: middle; }
 
-.shell { display: grid; grid-template-columns: 230px minmax(0, 1fr); height: 100%; }
-nav.side { border-right: 1px solid var(--line); padding: 18px 12px; display: flex; flex-direction: column; gap: 2px; background: linear-gradient(180deg, var(--panel) 0, var(--bg) 70%); }
-.brand { display: flex; align-items: flex-end; gap: 10px; padding: 0 8px 18px; }
-.brand canvas { width: 52px; height: auto; }
-.brand b { font: 650 1.15rem/1.1 var(--serif); font-variation-settings: "SOFT" 100, "WONK" 1; display: block; }
-.brand small { color: var(--dim); font-size: .78rem; }
-.tab { display: flex; align-items: center; gap: 10px; border: 0; background: none; text-align: left; padding: 9px 12px; border-radius: 10px; color: var(--dim); font-weight: 600; }
-.tab:hover { background: var(--panel-2); color: var(--text); }
-.tab[aria-current=page] { background: var(--panel-2); color: var(--text); box-shadow: inset 3px 0 0 var(--leaf); }
-.tab i { width: 8px; height: 8px; border-radius: 2px; background: var(--c); flex: none; }
-.side .foot { margin-top: auto; padding: 12px 8px 0; color: var(--faint); font-size: .8rem; }
+/* title bar */
+header { display: flex; align-items: center; gap: 1.5ch; margin: 0 0 1em; flex-wrap: wrap; }
+header canvas { width: 36px; height: auto; image-rendering: pixelated; }
+header h1 { margin: 0; font-size: 1em; font-weight: 700; color: var(--leaf); }
+header .rule { flex: 1; border-top: 1px solid var(--border); min-width: 4ch; }
+.search { display: flex; align-items: center; gap: .6ch; border: 1px solid var(--border); border-radius: 6px; padding: .15em .9ch; }
+.search:focus-within { border-color: var(--leaf); }
+.search input { background: none; border: 0; outline: none; width: 24ch; }
+.search kbd { color: var(--dim); font: inherit; border: 1px solid var(--border); border-radius: 4px; padding: 0 .6ch; font-size: .85em; }
 
-main { overflow: auto; padding: 28px 34px 60px; }
-.head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 6px; flex-wrap: wrap; }
-.head h1 { font-size: 2rem; }
-.lede { color: var(--dim); margin: 0 0 22px; max-width: 60em; }
-.btn { border: 1px solid var(--line); background: var(--panel-2); padding: 8px 14px; border-radius: 10px; font-weight: 600; }
-.btn:hover { border-color: var(--leaf); }
-.btn.go { background: var(--leaf); color: #10170f; border-color: var(--leaf); }
-.btn.quiet { background: none; }
-.btn.bad { color: var(--err); }
-.btn:disabled { opacity: .5; cursor: default; }
-input.field, textarea.field, select.field { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; outline: none; width: 100%; }
-input.field:focus, textarea.field:focus { border-color: var(--leaf); }
-.msg { min-height: 1.4em; color: var(--dim); font-size: .9rem; margin-top: 8px; }
+/* sections, as a row of keys */
+nav.tabs { display: flex; flex-wrap: wrap; gap: .6ch; margin: 0 0 2em; }
+nav.tabs button { background: none; border: 1px solid transparent; border-radius: 6px; padding: .15em 1.3ch; color: var(--dim); }
+nav.tabs button:hover { color: var(--fg); border-color: var(--border); }
+nav.tabs button[aria-current="page"] { color: var(--bg); background: var(--leaf); border-color: var(--leaf); font-weight: 700; }
+nav.tabs .n { opacity: .7; margin-left: .6ch; font-size: .9em; }
+
+/* panels */
+.grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 2.2em 2.5ch; align-items: start; }
+.box { position: relative; border: 1px solid var(--border); border-radius: 9px; padding: 1.2em 2ch 1.1em; min-width: 0; transition: border-color .15s; }
+.box:focus-within { border-color: color-mix(in srgb, var(--leaf) 45%, var(--border)); }
+.box > h2 { position: absolute; top: -.82em; left: 1.6ch; margin: 0; padding: 0 .7ch; background: var(--bg); font: inherit; font-weight: 700; color: var(--blossom); max-width: calc(100% - 4ch); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.box > .aside { position: absolute; top: -.82em; right: 1.6ch; padding: 0 .7ch; background: var(--bg); color: var(--dim); display: flex; gap: .8ch; align-items: center; }
+.w3 { grid-column: span 3; } .w4 { grid-column: span 4; } .w5 { grid-column: span 5; } .w6 { grid-column: span 6; } .w7 { grid-column: span 7; } .w8 { grid-column: span 8; } .w9 { grid-column: span 9; } .w12 { grid-column: span 12; }
+.stack { display: grid; gap: 2.2em; align-content: start; min-width: 0; }
+p.note { margin: 0 0 .9em; color: var(--dim); max-width: 78ch; }
+p.note:last-child { margin-bottom: 0; }
+
+/* controls */
+.mini { background: none; border: 1px solid var(--border); border-radius: 5px; padding: 0 1.1ch; white-space: nowrap; text-decoration: none; color: inherit; }
+.mini:hover:not(:disabled) { border-color: var(--leaf); color: var(--leaf); }
+.mini.go { border-color: var(--leaf); color: var(--leaf); }
+.mini.go:hover:not(:disabled) { background: var(--leaf); color: var(--bg); }
+.mini.bad:hover:not(:disabled) { border-color: var(--err); color: var(--err); }
+.mini:disabled { opacity: .45; cursor: default; }
+.mini[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.line { display: flex; gap: 1ch; align-items: center; min-width: 0; }
+.line .grow { flex: 1; min-width: 0; }
+.field { background: none; border: 0; border-bottom: 1px solid var(--border); outline: none; padding: .15em 0; width: 100%; min-width: 0; }
+.field:focus { border-color: var(--leaf); }
+textarea.field { border: 1px solid var(--border); border-radius: 6px; padding: .5em 1ch; resize: vertical; line-height: 1.5; }
+textarea.field:focus { border-color: var(--leaf); }
+select.field { background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: .1em .6ch; width: auto; max-width: 100%; }
+.prompt { color: var(--leaf); font-weight: 700; }
+.msg { min-height: 1.5em; color: var(--dim); margin-top: .5em; }
 .msg.bad { color: var(--err); }
-.chip { display: inline-flex; align-items: center; gap: 6px; font-size: .78rem; font-weight: 700; border-radius: 99px; padding: 2px 9px; background: var(--panel-2); color: var(--dim); white-space: nowrap; }
-.chip.ok { color: var(--leaf); }
-.chip.no { color: var(--err); }
-.chip.warn { color: var(--sun); }
+.pill { display: inline-block; padding: 0 .9ch; border-radius: 4px; background: color-mix(in srgb, var(--fg) 9%, transparent); color: var(--dim); white-space: nowrap; font-size: .92em; }
+.pill.ok { color: var(--ok); } .pill.no { color: var(--err); } .pill.warn { color: var(--warn); }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-weight: 400; color: var(--dim); padding: 0 2ch .35em 0; border-bottom: 1px solid var(--border); }
+td { padding: .35em 2ch .35em 0; vertical-align: top; overflow-wrap: anywhere; border-bottom: 1px dashed color-mix(in srgb, var(--border) 60%, transparent); }
+tr:last-child td { border-bottom: 0; }
+.empty { color: var(--dim); padding: 1.2em 0; }
+.rows > * { padding: .5em 0; border-top: 1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
+.rows > *:first-child { border-top: 0; padding-top: 0; }
+
+/* ask: the quick-question bar */
+.ask .bar { display: flex; gap: 1ch; align-items: center; }
+.ask .bar input { font-size: 1.05em; }
+.ask .who { display: flex; flex-wrap: wrap; gap: .5em 1ch; align-items: center; margin: 1em 0 .4em; color: var(--dim); }
+.ask .who .acts { margin-left: auto; display: flex; gap: .8ch; }
+.ask .who b { color: var(--fg); }
+.ask .answer { max-width: 96ch; }
+.ask .cursor::after { content: "▍"; color: var(--leaf); animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ask .cursor::after { animation: none; } }
 
 /* chats */
-.chats { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 20px; align-items: start; }
-.chatlist { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--panel); position: sticky; top: 0; max-height: calc(100vh - 140px); display: flex; flex-direction: column; }
-.chatlist input { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; }
-.chatlist .items { overflow: auto; }
-.citem { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 10px 14px; border-bottom: 1px solid var(--line); }
-.citem:hover { background: var(--panel-2); }
-.citem[aria-current=true] { background: var(--panel-2); box-shadow: inset 3px 0 0 var(--blossom); }
-.citem b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.citem small { color: var(--faint); }
-.chatview { min-width: 0; }
-.treebox { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); padding: 12px; overflow: auto; margin-bottom: 16px; }
-.treebox svg { display: block; }
-.treebox .legend { font-size: .8rem; color: var(--dim); margin: 0 4px 8px; }
+.clist { max-height: 62vh; overflow: auto; margin: .6em -1ch 0; padding: 0 1ch; }
+.citem { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 1.5ch; width: 100%; text-align: left; background: none; border: 0; border-top: 1px dashed color-mix(in srgb, var(--border) 70%, transparent); padding: .45em 0; }
+.citem:first-child { border-top: 0; }
+.citem b { font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.citem small { color: var(--faint); grid-column: 1 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.citem time { color: var(--faint); }
+.citem:hover b { color: var(--leaf); }
+.citem[aria-current="true"] { box-shadow: inset 3px 0 0 var(--blossom); padding-left: 1.2ch; }
+.citem[aria-current="true"] b { color: var(--blossom); font-weight: 700; }
+.tree { overflow: auto; margin: 0 0 1em; padding-bottom: .3em; border-bottom: 1px dashed var(--border); }
+.tree svg { display: block; }
 .tnode { cursor: pointer; }
-.tnode:hover circle { stroke: var(--text); stroke-width: 2; }
-.msgs { display: flex; flex-direction: column; gap: 14px; }
-.m { border-radius: 14px; padding: 12px 16px; max-width: 900px; }
-.m.you { background: var(--panel-2); align-self: flex-start; border: 1px solid var(--line); }
-.m.ai { background: var(--panel); border: 1px solid var(--line); }
-.m .who { display: flex; align-items: center; gap: 8px; font-size: .8rem; font-weight: 700; color: var(--dim); margin-bottom: 6px; }
-.m.you .who { color: var(--sun); }
-.m .who canvas { width: 18px; height: 18px; }
-.m .sib { margin-left: auto; display: flex; gap: 4px; align-items: center; font-weight: 600; }
-.m .sib button { border: 0; background: var(--panel-2); border-radius: 6px; padding: 0 8px; color: var(--dim); }
+.tnode:hover circle { stroke: var(--fg); stroke-width: 2; }
+.legend { color: var(--dim); font-size: .9em; margin-bottom: .4em; }
+.thread { display: grid; gap: 1.1em; }
+.turn { display: grid; grid-template-columns: 14ch minmax(0, 1fr); gap: 0 2ch; }
+.turn .from { color: var(--sun); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn.ai .from { color: var(--leaf); }
+.turn .from canvas { width: 14px; height: 14px; margin-right: .6ch; }
+.turn .meta { color: var(--faint); font-size: .9em; }
+.sib { display: inline-flex; gap: .4ch; align-items: center; color: var(--dim); }
+.sib button { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 0 .7ch; color: var(--dim); }
+.sib button:hover { color: var(--leaf); border-color: var(--leaf); }
+.thought { color: var(--faint); border-left: 2px solid var(--border); padding-left: 1.2ch; margin: 0 0 .6em; white-space: pre-wrap; font-style: italic; }
 .md p { margin: 0 0 .7em; } .md p:last-child { margin-bottom: 0; }
-.md pre { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; overflow: auto; font: .85rem/1.5 var(--mono); }
-.md code { font: .88em var(--mono); background: var(--bg); padding: 1px 5px; border-radius: 5px; }
-.md pre code { background: none; padding: 0; }
-.md h1, .md h2, .md h3 { font-size: 1.1rem; margin: .6em 0 .3em; }
-.md ul, .md ol { margin: 0 0 .7em; padding-left: 1.4em; }
-.thought { color: var(--faint); font-size: .88rem; border-left: 2px solid var(--line); padding-left: 10px; margin-bottom: 8px; white-space: pre-wrap; }
-.err { color: var(--err); }
+.md pre { background: var(--code); border: 1px solid var(--border); border-radius: 6px; padding: .7em 1.4ch; overflow: auto; margin: 0 0 .8em; }
+.md code { background: var(--code); padding: 0 .5ch; border-radius: 3px; color: var(--sun); }
+.md pre code { background: none; padding: 0; color: var(--fg); }
+.md h3 { font-size: 1em; color: var(--blossom); margin: .8em 0 .3em; }
+.md ul, .md ol { margin: 0 0 .7em; padding-left: 2.5ch; }
+.md li::marker { color: var(--leaf); }
 
 /* garden */
-.beds { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-bottom: 30px; }
-.bed { border: 1px solid var(--line); background: var(--panel); border-radius: 14px; padding: 14px; display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 4px 12px; align-items: center; }
-.bed.cur { border-color: var(--leaf); }
-.bed canvas { width: 48px; height: 48px; grid-row: 1 / span 2; }
+.beds { display: grid; grid-template-columns: repeat(auto-fill, minmax(30ch, 1fr)); gap: 1.2em 2.5ch; }
+.bed { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: .1em 1.6ch; align-items: center; padding: .7em 1.4ch; border: 1px solid var(--border); border-radius: 7px; }
+.bed.cur { border-color: var(--leaf); box-shadow: inset 3px 0 0 var(--leaf); }
+.bed canvas { width: 48px; height: 48px; grid-row: 1 / span 3; }
 .bed b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bed small { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bed .acts { grid-column: 1 / -1; display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-.bed .acts .btn { padding: 5px 10px; font-size: .85rem; }
-.seeds { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
-.seed { display: grid; grid-template-columns: 30px minmax(0, 1fr) 220px auto; gap: 12px; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
-.seed:last-child { border-bottom: 0; }
-.seed canvas { width: 24px; height: 24px; }
-.seed b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; font-weight: 600; }
-.seed small { color: var(--faint); font-size: .78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
-.seed .price { color: var(--dim); font-size: .82rem; }
-.filters { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
-.filters input { max-width: 340px; }
-.filters button[aria-pressed=true] { border-color: var(--leaf); color: var(--leaf); }
+.bed .acts { grid-column: 1 / -1; display: flex; gap: .6ch; margin-top: .5em; flex-wrap: wrap; }
+.seeds .seed { display: grid; grid-template-columns: 24px minmax(0, 1fr) minmax(0, 22ch) auto; gap: 0 1.6ch; align-items: center; }
+.seed canvas { width: 20px; height: 20px; }
+.seed b { font-weight: 400; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seed small { color: var(--faint); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seed .price { color: var(--dim); font-size: .92em; text-align: right; }
+.filters { display: flex; gap: .7ch; flex-wrap: wrap; align-items: center; margin: 0 0 1em; }
+.filters .field { max-width: 34ch; }
 
-/* keys, computer, network, settings */
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
-.card { border: 1px solid var(--line); background: var(--panel); border-radius: 14px; padding: 16px; }
-.card h3 { font-size: 1.05rem; display: flex; align-items: center; gap: 10px; }
-.card p { color: var(--dim); margin: 6px 0 12px; font-size: .9rem; }
-.row { display: flex; gap: 8px; align-items: center; }
-.row .field { flex: 1; }
-table.net { border-collapse: collapse; width: 100%; max-width: 900px; }
-table.net td, table.net th { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; font-size: .92rem; }
-table.net th { color: var(--dim); font-size: .78rem; }
-.bar { height: 8px; border-radius: 99px; background: var(--panel-2); overflow: hidden; margin-top: 10px; }
-.bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--leaf), var(--sun)); transition: width .3s; }
-.swatches { display: flex; gap: 10px; flex-wrap: wrap; }
-.swatch { border: 2px solid var(--line); border-radius: 14px; padding: 12px; width: 190px; text-align: left; }
-.swatch[aria-pressed=true] { border-color: var(--leaf); }
-.swatch span { display: flex; gap: 4px; margin-bottom: 8px; }
-.swatch span i { width: 18px; height: 18px; border-radius: 5px; }
-.empty { color: var(--dim); padding: 40px 10px; text-align: center; }
-.suggest { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
-.suggest button { border: 1px dashed var(--line); background: none; border-radius: 99px; padding: 3px 10px; font-size: .82rem; color: var(--dim); }
-.suggest button:hover { color: var(--text); border-color: var(--leaf); }
+/* usage bars, drawn in text */
+.tbar { color: var(--leaf); letter-spacing: -.05em; white-space: nowrap; }
+.tbar span { color: var(--border); }
+.progress { color: var(--leaf); white-space: nowrap; overflow: hidden; }
 
-@media (max-width: 900px) {
-  .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  nav.side { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 10px; }
-  .brand, .side .foot { display: none; }
-  main { padding: 20px 16px 60px; }
-  .chats { grid-template-columns: 1fr; }
-  .chatlist { position: static; max-height: 260px; }
-  .seed { grid-template-columns: 26px minmax(0, 1fr) auto; }
+/* colours */
+.swatches { display: flex; gap: 1.2ch; flex-wrap: wrap; }
+.swatch { border: 1px solid var(--border); border-radius: 7px; padding: .6em 1.4ch; width: 24ch; text-align: left; }
+.swatch[aria-pressed="true"] { border-color: var(--leaf); box-shadow: inset 3px 0 0 var(--leaf); }
+.swatch span { display: flex; gap: .5ch; margin-bottom: .4em; }
+.swatch span i { width: 1.6ch; height: 1em; border-radius: 3px; display: block; }
+.check { display: flex; gap: 1ch; align-items: flex-start; color: var(--dim); margin: .4em 0; cursor: pointer; }
+.check input { accent-color: var(--leaf); margin-top: .35em; }
+footer { margin-top: 3em; color: var(--faint); display: flex; gap: 2ch; flex-wrap: wrap; }
+
+@media (max-width: 1000px) { .w3, .w4, .w5, .w6, .w7, .w8, .w9 { grid-column: span 12; } .clist { max-height: 30vh; } }
+@media (max-width: 640px) {
+  body { padding: 1em 1.5ch 2em; }
+  .search input { width: 14ch; }
+  .turn { grid-template-columns: 1fr; }
+  .seeds .seed { grid-template-columns: 22px minmax(0, 1fr) auto; }
   .seed .price { display: none; }
+  .ask > .aside { display: none; }
+  header .rule { display: none; }
 }
 </style>
 </head>
 <body>
-<div class="shell">
-  <nav class="side" aria-label="Sections">
-    <div class="brand"><canvas class="px" id="rowan" aria-hidden="true"></canvas><div><b>Tree of Thought</b><small id="ver"></small></div></div>
-    <button class="tab" data-tab="chats" style="--c:var(--blossom)"><i></i>Chats</button>
-    <button class="tab" data-tab="garden" style="--c:var(--leaf)"><i></i>Garden</button>
-    <button class="tab" data-tab="keys" style="--c:var(--sun)"><i></i>Keys</button>
-    <button class="tab" data-tab="computer" style="--c:var(--water)"><i></i>This computer</button>
-    <button class="tab" data-tab="network" style="--c:var(--bark)"><i></i>Network check</button>
-    <button class="tab" data-tab="settings" style="--c:var(--dim)"><i></i>Settings</button>
-    <div class="foot">Everything here lives in ~/.tot on this computer. Keep the terminal open while you use this page.</div>
-  </nav>
-  <main id="main"></main>
-</div>
+<header>
+  <canvas id="rowan" class="px" aria-hidden="true"></canvas>
+  <h1>tree of thought <span class="dim">·</span> dashboard</h1>
+  <span id="ver" class="faint"></span>
+  <span class="rule"></span>
+  <form class="search" id="searchForm" role="search"><input id="q" type="search" placeholder="search every chat" aria-label="Search every chat (press / to start)" autocomplete="off"><kbd>/</kbd></form>
+</header>
+<nav class="tabs" aria-label="Sections">
+  <button data-tab="chats">chats</button>
+  <button data-tab="garden">garden</button>
+  <button data-tab="computer">free models</button>
+  <button data-tab="projects">projects</button>
+  <button data-tab="usage">usage</button>
+  <button data-tab="keys">keys</button>
+  <button data-tab="network">network</button>
+  <button data-tab="settings">settings</button>
+</nav>
+<main class="grid" id="main"></main>
+<footer><span>runs on this computer only · your keys are never shown here</span><span>tot in the terminal: Tab opens the same things</span></footer>
 
 <script>
 (function () {
   'use strict';
   var CFG = /*TOT_CONFIG*/{};
   var API = (CFG.base || '') + '/api/';
-  var S = null, tab = 'chats', chatList = [], chat = null, leaf = null, models = null, modelErr = [], netRes = null, ollama = undefined, pulling = null;
+  var S = null, tab = 'chats', chatList = [], chat = null, leaf = null, models = null, modelErr = [], netRes = null, ollama, pulling = null, usage = null, hits = null, query = '';
+  var asking = null; // { name, maker, plant, text, note, err, done, chat }
   var $ = function (id) { return document.getElementById(id); };
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-  function ago(ts) { var s = (Date.now() - ts) / 1000; if (s < 60) return 'just now'; if (s < 3600) return Math.round(s / 60) + ' min ago'; if (s < 86400) return Math.round(s / 3600) + ' h ago'; return new Date(ts).toLocaleDateString(); }
+  function ago(ts) { var s = (Date.now() - ts) / 1000; if (s < 60) return 'just now'; if (s < 3600) return Math.round(s / 60) + 'm ago'; if (s < 86400) return Math.round(s / 3600) + 'h ago'; if (s < 86400 * 30) return Math.round(s / 86400) + 'd ago'; return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); }
   function size(n) { var u = ['B', 'KB', 'MB', 'GB']; var i = 0; while (n >= 1024 && i < 3) { n /= 1024; i++; } return (i ? n.toFixed(1) : n) + ' ' + u[i]; }
+  function num(x) { return x >= 1e6 ? (x / 1e6).toFixed(1) + 'M' : x >= 1e3 ? (x / 1e3).toFixed(1) + 'k' : String(x); }
+  function box(w, title, aside, inner, cls) { return '<section class="box ' + w + (cls ? ' ' + cls : '') + '"><h2>' + title + '</h2>' + (aside ? '<span class="aside">' + aside + '</span>' : '') + inner + '</section>'; }
   function api(path, opts) {
     opts = opts || {};
     return fetch(API + path, { method: opts.method || (opts.body ? 'POST' : 'GET'), headers: opts.body ? { 'content-type': 'application/json' } : {}, body: opts.body ? JSON.stringify(opts.body) : undefined })
-      .catch(function () { throw new Error("Can't reach Tree of Thought. Is `tot dashboard` (or tot) still running?"); })
+      .catch(function () { throw new Error("Can't reach Tree of Thought. Is tot (or tot dashboard) still running?"); })
       .then(function (r) { return r.json().then(function (j) { if (!r.ok || j.error) throw new Error(j.error || 'error ' + r.status); return j; }); });
+  }
+  function lines(path, body, each) { // a streamed answer: one JSON object per line
+    return fetch(API + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(function (r) {
+      if (!r.ok) return r.json().then(function (j) { throw new Error(j.error || 'error ' + r.status); });
+      var reader = r.body.getReader(), dec = new TextDecoder(), buf = '';
+      function more() {
+        return reader.read().then(function (x) {
+          if (x.done) return;
+          buf += dec.decode(x.value, { stream: true });
+          var i;
+          while ((i = buf.indexOf('\n')) >= 0) { var l = buf.slice(0, i); buf = buf.slice(i + 1); if (l.trim()) { try { each(JSON.parse(l)); } catch (e) { /* half a line */ } } }
+          return more();
+        });
+      }
+      return more();
+    });
   }
 
   // ── pixels ──
@@ -186,62 +236,111 @@ table.net th { color: var(--dim); font-size: .78rem; }
     grid.forEach(function (row, y) { row.split('').forEach(function (c, x) { if (ink[c]) { g.fillStyle = ink[c]; g.fillRect(x * scale, y * scale, scale, scale); } }); });
     return cv;
   }
-  function plant(name, scale) { var p = S.plants[name] || S.plants.sprout; return draw(document.createElement('canvas'), p.grid, p.ink, scale || 4); }
-  function plantColor(name) { var p = S.plants[name] || S.plants.sprout; var k = Object.keys(p.ink)[0]; return p.ink[k]; }
+  function plantColor(name) { var p = S.plants[name] || S.plants.sprout; return p.ink[Object.keys(p.ink)[0]]; }
+  function plantTag(name) { return '<canvas data-plant="' + esc(name || 'sprout') + '"></canvas>'; }
   function paintPlants(root) { root.querySelectorAll('canvas[data-plant]').forEach(function (c) { var p = S.plants[c.dataset.plant] || S.plants.sprout; draw(c, p.grid, p.ink, 4); c.classList.add('px'); }); }
 
   // ── theme ──
   function applyTheme() {
     var t = S.themes[S.settings.theme] || S.themes.grove, r = document.documentElement.style;
-    r.setProperty('--bg', t.paper.bg); r.setProperty('--text', t.paper.fg); r.setProperty('--panel', t.select); r.setProperty('--panel-2', t.code);
-    r.setProperty('--line', t.border); r.setProperty('--dim', t.dim); r.setProperty('--faint', t.faint);
-    ['leaf', 'blossom', 'bark', 'sun', 'water'].forEach(function (k) { r.setProperty('--' + k, t[k]); });
-    r.setProperty('--err', t.err);
+    r.setProperty('--bg', t.paper.bg); r.setProperty('--fg', t.paper.fg);
+    ['dim', 'faint', 'border', 'code', 'leaf', 'blossom', 'bark', 'sun', 'water', 'err', 'warn', 'ok'].forEach(function (k) { if (t[k]) r.setProperty('--' + k, t[k]); });
+    r.setProperty('--panel', t.select);
     var trimmed = S.rowan.filter(function (row) { return /[^.]/.test(row); });
     draw($('rowan'), trimmed, t.rowan, 2);
     try { $('icon').href = $('rowan').toDataURL(); } catch (e) { /* fine */ }
   }
 
-  // ── tabs ──
-  document.querySelectorAll('.tab').forEach(function (b) { b.onclick = function () { go(b.dataset.tab); }; });
+  // ── sections ──
+  document.querySelectorAll('[data-tab]').forEach(function (b) { b.onclick = function () { go(b.dataset.tab); }; });
   function go(t) {
     tab = t;
-    location.hash = t;
-    document.querySelectorAll('.tab').forEach(function (b) { if (b.dataset.tab === t) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+    if (location.hash.slice(1) !== t) history.replaceState(null, '', '#' + t);
+    document.querySelectorAll('[data-tab]').forEach(function (b) { if (b.dataset.tab === t) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
     if (t === 'chats') api('chats').then(function (l) { chatList = l; render(); });
     if (t === 'garden' && !models) api('models').then(function (r) { models = r.list; modelErr = r.errors; render(); }, function () { models = []; render(); });
     if (t === 'computer') api('ollama').then(function (r) { ollama = r.models; render(); });
+    if (t === 'usage') api('usage').then(function (r) { usage = r; render(); });
     render();
   }
   function render() {
     var m = $('main');
-    var fn = { chats: chatsView, garden: gardenView, keys: keysView, computer: computerView, network: networkView, settings: settingsView }[tab];
+    var keep = document.activeElement && document.activeElement.id && m.contains(document.activeElement) ? { id: document.activeElement.id, at: document.activeElement.selectionStart } : null;
+    var fn = { chats: chatsView, garden: gardenView, computer: computerView, projects: projectsView, usage: usageView, keys: keysView, network: networkView, settings: settingsView }[tab];
     m.innerHTML = fn();
     paintPlants(m);
-    wire[tab] && wire[tab]();
+    if (wire[tab]) wire[tab]();
+    if (keep && $(keep.id)) { var el = $(keep.id); el.focus(); try { if (keep.at != null) el.setSelectionRange(keep.at, keep.at); } catch (e) { /* not text */ } }
   }
   var wire = {};
 
-  // ══ chats ══
+  // search every chat (press / to start)
+  document.addEventListener('keydown', function (e) { if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { e.preventDefault(); $('q').focus(); } });
+  $('searchForm').onsubmit = function (e) { e.preventDefault(); query = $('q').value.trim(); if (!query) { hits = null; render(); return; } api('search?q=' + encodeURIComponent(query)).then(function (r) { hits = r; if (tab !== 'chats') go('chats'); else render(); }); };
+  $('q').oninput = function () { if (!$('q').value) { hits = null; query = ''; if (tab === 'chats') render(); } };
+
+  // ══ chats (and the quick-question bar) ══
+  function askBox() {
+    var m = S.garden.filter(function (x) { return x.current; })[0];
+    var opts = S.garden.map(function (g) { var k = g.provider + ':' + g.id; return '<option value="' + esc(k) + '"' + (g.current ? ' selected' : '') + '>' + esc(g.name) + '</option>'; }).join('');
+    var inner = '<form class="bar" id="askForm"><span class="prompt">›</span><input class="field grow" id="askQ" placeholder="' + (m ? 'ask anything…' : 'plant a model first (free models: the free models tab)') + '" autocomplete="off"' + (m ? '' : ' disabled') + '>' +
+      (S.garden.length > 1 ? '<select class="field" id="askM" aria-label="Which model">' + opts + '</select>' : '') + '<button class="mini go" id="askGo"' + (m ? '' : ' disabled') + '>' + (asking && !asking.done ? 'stop' : 'ask') + '</button></form>';
+    if (asking) {
+      inner += '<div class="who">' + plantTag(asking.plant) + '<b>' + esc(asking.name) + '</b>' + (asking.maker ? ' · ' + esc(asking.maker) : '') + (asking.done && asking.chat ? '<span class="acts"><button class="mini" id="askMore">follow up</button><button class="mini" id="askOpen">open as a chat</button></span>' : '') + '</div>';
+      if (asking.note) inner += '<p class="note">' + esc(asking.note) + '</p>';
+      inner += '<div class="answer md' + (asking.done ? '' : ' cursor') + '">' + md(asking.text || '') + '</div>';
+      if (asking.err) inner += '<p class="msg bad">' + esc(asking.err) + '</p>';
+    }
+    return box('w12', 'ask', '<span>quick answers · saved as a chat</span>', inner, 'ask');
+  }
   var chatQuery = '';
   function chatsView() {
+    var html = askBox();
+    if (hits) {
+      html += box('w12', 'search', esc(hits.length + ' chat' + (hits.length === 1 ? '' : 's') + ' with “' + query + '”') + ' <button class="mini" id="clearHits">clear</button>',
+        hits.length ? '<div class="rows">' + hits.map(function (h) { return '<button class="citem" data-chat="' + h.id + '"><b>' + esc(h.title) + '</b><time>' + ago(h.updated) + '</time><small>…' + esc(h.hit) + '…</small></button>'; }).join('') + '</div>' : '<p class="empty">Nothing found.</p>');
+    }
+    var proj = {}; S.projects.forEach(function (p) { proj[p.id] = p.name; });
     var list = chatList.filter(function (c) { return !chatQuery || (c.title || '').toLowerCase().indexOf(chatQuery.toLowerCase()) >= 0; });
-    var html = '<div class="head"><h1>Chats</h1></div><p class="lede">Every conversation is a tree. Each dot is a message: click one to read the branch it\'s on.</p>';
-    if (!chatList.length) return html + '<div class="empty">No chats yet. Ask something in <b>tot</b>, and it shows up here.</div>';
-    html += '<div class="chats"><div class="chatlist"><input class="field" id="cq" placeholder="Search chats" value="' + esc(chatQuery) + '"><div class="items">' +
-      list.map(function (c) { return '<button class="citem" data-chat="' + c.id + '" aria-current="' + (chat && chat.id === c.id) + '"><b>' + esc(c.title || 'untitled') + '</b><small>' + c.messages + ' messages · ' + ago(c.updated) + '</small></button>'; }).join('') +
-      '</div></div><div class="chatview" id="cv">' + (chat ? chatHtml() : '<div class="empty">Pick a chat.</div>') + '</div></div>';
+    var left = '<input class="field" id="cq" placeholder="filter by title" value="' + esc(chatQuery) + '">' + (chatList.length ? '<div class="clist">' +
+      list.map(function (c) { return '<button class="citem" data-chat="' + c.id + '" aria-current="' + !!(chat && chat.id === c.id) + '"><b>' + esc(c.title || 'untitled') + '</b><time>' + ago(c.updated) + '</time><small>' + c.messages + ' messages' + (c.project && proj[c.project] ? ' · ' + esc(proj[c.project]) : '') + '</small></button>'; }).join('') + '</div>' : '<p class="empty">No chats yet. Ask something above, or in tot.</p>');
+    html += box('w4', 'chats', chatList.length + '', left);
+    html += chat ? box('w8', esc(chat.title || 'untitled'), '<a class="mini" href="' + API + 'chats/' + chat.id + '/export">markdown</a><button class="mini" id="cRename">rename</button><button class="mini bad" id="cDelete">delete</button>', chatHtml())
+      : box('w8', 'conversation', '', '<p class="empty">Pick a chat. Every conversation is a tree: each dot is a message, and each fork is a place where you asked again or asked another model.</p>');
     return html;
   }
   wire.chats = function () {
-    var q = $('cq'); if (q) q.oninput = function () { chatQuery = q.value; var pos = q.selectionStart; render(); var n = $('cq'); n.focus(); n.setSelectionRange(pos, pos); };
+    var q = $('cq'); if (q) q.oninput = function () { chatQuery = q.value; render(); };
     document.querySelectorAll('[data-chat]').forEach(function (b) { b.onclick = function () { openChat(b.dataset.chat); }; });
     document.querySelectorAll('.tnode').forEach(function (g) { g.onclick = function () { leaf = tipOf(g.dataset.id); render(); }; });
     document.querySelectorAll('[data-turn]').forEach(function (b) { b.onclick = function () { turn(b.dataset.id, Number(b.dataset.turn)); }; });
-    var x = $('cRename'); if (x) x.onclick = function () { var t = prompt('Rename this chat', chat.title); if (t) api('chats/' + chat.id + '/rename', { body: { title: t } }).then(function () { chat.title = t; return api('chats'); }).then(function (l) { chatList = l; render(); }); };
+    var x = $('clearHits'); if (x) x.onclick = function () { hits = null; $('q').value = ''; render(); };
+    x = $('cRename'); if (x) x.onclick = function () { var t = prompt('Rename this chat', chat.title); if (t) api('chats/' + chat.id + '/rename', { body: { title: t } }).then(function () { chat.title = t; return api('chats'); }).then(function (l) { chatList = l; render(); }); };
     x = $('cDelete'); if (x) x.onclick = function () { if (confirm('Delete "' + chat.title + '" for good?')) api('chats/' + chat.id, { method: 'DELETE' }).then(function () { chat = null; return api('chats'); }).then(function (l) { chatList = l; render(); }); };
+    x = $('askForm'); if (x) x.onsubmit = function (e) { e.preventDefault(); if (asking && !asking.done) { if (asking.stop) asking.stop.abort(); return; } ask($('askQ').value.trim(), $('askM') ? $('askM').value : null, null); };
+    x = $('askOpen'); if (x) x.onclick = function () { openChat(asking.chat); };
+    x = $('askMore'); if (x) x.onclick = function () { asking.follow = asking.chat; $('askQ').placeholder = 'follow up on “' + (asking.q || '').slice(0, 40) + '”…'; $('askQ').focus(); };
   };
-  function openChat(id) { api('chats/' + id).then(function (c) { chat = c; leaf = c.leaf || tipOf(roots()[0] && roots()[0].id); render(); }); }
+  function ask(q, model, chatId) {
+    if (!q) return;
+    var follow = asking && asking.follow;
+    asking = { name: '…', text: '', q: q, done: false, stop: new AbortController() };
+    render();
+    lines('ask', { question: q, model: model, chat: follow || chatId || null }, function (ev) {
+      if (ev.type === 'model' || ev.type === 'switch') { asking.name = ev.name; asking.maker = ev.maker; asking.plant = ev.plant; if (ev.chat) asking.chat = ev.chat; if (ev.type === 'switch') { asking.text = ''; asking.note = ev.from + ' ' + ev.why + ', so ' + ev.name + ' is answering.'; } }
+      if (ev.type === 'text') asking.text += ev.t;
+      if (ev.type === 'done') { asking.done = true; asking.chat = ev.chat; if (ev.note) asking.note = ev.note; api('chats').then(function (l) { chatList = l; if (tab === 'chats') render(); }); }
+      if (ev.type === 'error') { asking.done = true; asking.err = ev.error; asking.chat = ev.chat; }
+      if (tab === 'chats') renderAsk();
+    }).then(function () { asking.done = true; if (tab === 'chats') render(); }, function (e) { asking.done = true; asking.err = e.message; if (tab === 'chats') render(); });
+  }
+  function renderAsk() { // just the answer, so typing elsewhere isn't interrupted
+    var a = document.querySelector('.ask .answer');
+    if (!a) return render();
+    a.innerHTML = md(asking.text || '');
+    var who = document.querySelector('.ask .who b'); if (who) who.textContent = asking.name;
+  }
+  function openChat(id) { api('chats/' + id).then(function (c) { chat = c; leaf = c.leaf || tipOf(roots()[0] && roots()[0].id); render(); window.scrollTo({ top: 0 }); }); }
   function kids(id) { return Object.values(chat.nodes).filter(function (n) { return n.parent === (id || null); }).sort(function (a, b) { return a.ts - b.ts; }); }
   function roots() { return kids(null); }
   function newest(n) { var t = n.ts; kids(n.id).forEach(function (k) { t = Math.max(t, newest(k)); }); return t; }
@@ -254,7 +353,6 @@ table.net th { color: var(--dim); font-size: .78rem; }
   }
   function chatHtml() {
     var onPath = {}; pathTo(leaf).forEach(function (n) { onPath[n.id] = 1; });
-    // a tidy little tree: depth goes right, branches stack down
     var pos = {}, row = 0, maxD = 0;
     (function place(list, d) {
       list.forEach(function (n) {
@@ -266,45 +364,46 @@ table.net th { color: var(--dim); font-size: .78rem; }
         pos[n.id] = { x: d, y: (Math.min.apply(null, ys) + Math.max.apply(null, ys)) / 2 };
       });
     })(roots(), 0);
-    var DX = 64, DY = 26, W = (maxD + 1) * DX + 30, H = Math.max(1, row) * DY + 10;
+    var DX = 56, DY = 24, W = (maxD + 1) * DX + 30, H = Math.max(1, row) * DY + 8;
     var svg = '<svg width="' + W + '" height="' + H + '" role="img" aria-label="The shape of this chat">';
     Object.values(chat.nodes).forEach(function (n) {
       var p = chat.nodes[n.parent]; if (!p || !pos[n.id] || !pos[p.id]) return;
       var a = pos[p.id], b = pos[n.id], on = onPath[n.id] && onPath[p.id];
-      var x1 = 16 + a.x * DX, y1 = 14 + a.y * DY, x2 = 16 + b.x * DX, y2 = 14 + b.y * DY, mx = (x1 + x2) / 2;
-      svg += '<path d="M' + x1 + ' ' + y1 + ' C' + mx + ' ' + y1 + ' ' + mx + ' ' + y2 + ' ' + x2 + ' ' + y2 + '" fill="none" stroke="' + (on ? 'var(--bark)' : 'var(--line)') + '" stroke-width="' + (on ? 3 : 2) + '"/>';
+      var x1 = 14 + a.x * DX, y1 = 12 + a.y * DY, x2 = 14 + b.x * DX, y2 = 12 + b.y * DY, mx = (x1 + x2) / 2;
+      svg += '<path d="M' + x1 + ' ' + y1 + ' C' + mx + ' ' + y1 + ' ' + mx + ' ' + y2 + ' ' + x2 + ' ' + y2 + '" fill="none" stroke="' + (on ? 'var(--bark)' : 'var(--border)') + '" stroke-width="' + (on ? 3 : 2) + '"/>';
     });
     Object.values(chat.nodes).forEach(function (n) {
       var p = pos[n.id]; if (!p) return;
       var col = n.role === 'user' ? 'var(--sun)' : n.err ? 'var(--err)' : plantColor(n.plant);
-      svg += '<g class="tnode" data-id="' + n.id + '"><title>' + esc((n.role === 'user' ? 'you: ' : (n.name || 'model') + ': ') + (n.text || '').slice(0, 80)) + '</title><circle cx="' + (16 + p.x * DX) + '" cy="' + (14 + p.y * DY) + '" r="' + (n.id === leaf ? 8 : onPath[n.id] ? 7 : 5.5) + '" fill="' + col + '" stroke="' + (onPath[n.id] ? 'var(--text)' : 'none') + '" stroke-width="' + (n.id === leaf ? 2 : 1) + '"/></g>';
+      svg += '<g class="tnode" data-id="' + n.id + '"><title>' + esc((n.role === 'user' ? 'you: ' : (n.name || 'model') + ': ') + (n.text || '').slice(0, 80)) + '</title><circle cx="' + (14 + p.x * DX) + '" cy="' + (12 + p.y * DY) + '" r="' + (n.id === leaf ? 7.5 : onPath[n.id] ? 6.5 : 5) + '" fill="' + col + '" stroke="' + (onPath[n.id] ? 'var(--fg)' : 'none') + '" stroke-width="' + (n.id === leaf ? 2 : 1) + '"/></g>';
     });
     svg += '</svg>';
+    var branches = Object.values(chat.nodes).filter(function (n) { return !kids(n.id).length; }).length;
     var msgs = pathTo(leaf).map(function (n) {
       var sib = kids(n.parent).filter(function (x) { return x.role === n.role; });
-      var turnHtml = sib.length > 1 ? '<span class="sib"><button data-turn="-1" data-id="' + n.id + '" aria-label="Previous branch">‹</button>' + (sib.indexOf(n) + 1) + ' of ' + sib.length + '<button data-turn="1" data-id="' + n.id + '" aria-label="Next branch">›</button></span>' : '';
-      if (n.role === 'user') return '<div class="m you"><div class="who">you · ' + ago(n.ts) + turnHtml + '</div><div class="md">' + md(n.text) + '</div></div>';
-      return '<div class="m ai"><div class="who"><canvas data-plant="' + esc(n.plant || 'sprout') + '"></canvas>' + esc(n.name || n.model || 'model') + turnHtml + '</div>' +
-        (n.thought ? '<div class="thought">' + esc(n.thought.slice(0, 2000)) + '</div>' : '') + (n.err ? '<div class="err">' + esc(n.err) + '</div>' : '') + '<div class="md">' + md(n.text || '') + '</div></div>';
+      var turnHtml = sib.length > 1 ? ' <span class="sib"><button data-turn="-1" data-id="' + n.id + '" aria-label="Previous branch">‹</button>' + (sib.indexOf(n) + 1) + '/' + sib.length + '<button data-turn="1" data-id="' + n.id + '" aria-label="Next branch">›</button></span>' : '';
+      var files = (n.files || []).map(function (f) { return '<div class="meta">+ ' + esc(f.name) + ' attached</div>'; }).join('');
+      if (n.role === 'user') return '<div class="turn"><div class="from">you<div class="meta">' + ago(n.ts) + turnHtml + '</div></div><div class="md">' + md(n.text) + files + '</div></div>';
+      return '<div class="turn ai"><div class="from" title="' + esc(n.name || '') + '">' + plantTag(n.plant) + esc(n.name || n.model || 'model') + '<div class="meta">' + (n.took ? (n.took / 1000).toFixed(1) + 's' : '') + turnHtml + '</div></div><div>' +
+        (n.note ? '<p class="note">' + esc(n.note) + '</p>' : '') + (n.thought ? '<div class="thought">' + esc(n.thought.slice(0, 2000)) + '</div>' : '') + (n.err ? '<p class="err">' + esc(n.err) + '</p>' : '') + '<div class="md">' + md(n.text || '') + '</div></div></div>';
     }).join('');
-    return '<div class="head"><h2 style="font-size:1.4rem">' + esc(chat.title || 'untitled') + '</h2><span style="flex:1"></span><a class="btn quiet" href="' + API + 'chats/' + chat.id + '/export">Save as Markdown</a><button class="btn quiet" id="cRename">Rename</button><button class="btn quiet bad" id="cDelete">Delete</button></div>' +
-      '<div class="treebox"><div class="legend"><span style="color:var(--sun)">●</span> you &nbsp; <span style="color:var(--leaf)">●</span> a model (coloured like its plant) &nbsp; the brown line is the branch below</div>' + svg + '</div><div class="msgs">' + msgs + '</div>';
+    return '<div class="legend"><span class="sun">●</span> you &nbsp; <span class="leaf">●</span> a model (its plant\'s colour) &nbsp; ' + branches + ' branch' + (branches === 1 ? '' : 'es') + ' · click a dot to read its branch</div><div class="tree">' + svg + '</div><div class="thread">' + msgs + '</div>';
   }
 
   // a small Markdown reader: code, headings, lists, bold, italics, links
   function md(src) {
-    var out = [], lines = String(src || '').split('\n'), i = 0;
+    var out = [], lns = String(src || '').split('\n'), i = 0;
     function inline(t) {
-      return esc(t).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/(^|\W)\*([^*\s][^*]*)\*/g, '$1<i>$2</i>')
+      return esc(t).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/(^|\W)\*([^*\s][^*]*)\*/g, '$1<i>$2</i>').replace(/(^|\W)_([^_\s][^_]*)_(?=\W|$)/g, '$1<i>$2</i>')
         .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
     }
-    while (i < lines.length) {
-      var l = lines[i];
-      if (/^```/.test(l)) { var code = []; i++; while (i < lines.length && !/^```/.test(lines[i])) code.push(lines[i++]); i++; out.push('<pre><code>' + esc(code.join('\n')) + '</code></pre>'); continue; }
+    while (i < lns.length) {
+      var l = lns[i];
+      if (/^```/.test(l)) { var code = []; i++; while (i < lns.length && !/^```/.test(lns[i])) code.push(lns[i++]); i++; out.push('<pre><code>' + esc(code.join('\n')) + '</code></pre>'); continue; }
       if (/^#{1,6}\s/.test(l)) { out.push('<h3>' + inline(l.replace(/^#+\s/, '')) + '</h3>'); i++; continue; }
-      if (/^\s*([-*]|\d+\.)\s/.test(l)) { var ol = /^\s*\d+\./.test(l), items = []; while (i < lines.length && /^\s*([-*]|\d+\.)\s/.test(lines[i])) items.push('<li>' + inline(lines[i++].replace(/^\s*([-*]|\d+\.)\s/, '')) + '</li>'); out.push((ol ? '<ol>' : '<ul>') + items.join('') + (ol ? '</ol>' : '</ul>')); continue; }
+      if (/^\s*([-*]|\d+\.)\s/.test(l)) { var ol = /^\s*\d+\./.test(l), items = []; while (i < lns.length && /^\s*([-*]|\d+\.)\s/.test(lns[i])) items.push('<li>' + inline(lns[i++].replace(/^\s*([-*]|\d+\.)\s/, '')) + '</li>'); out.push((ol ? '<ol>' : '<ul>') + items.join('') + (ol ? '</ol>' : '</ul>')); continue; }
       if (!l.trim()) { i++; continue; }
-      var para = []; while (i < lines.length && lines[i].trim() && !/^```|^#{1,6}\s|^\s*([-*]|\d+\.)\s/.test(lines[i])) para.push(lines[i++]);
+      var para = []; while (i < lns.length && lns[i].trim() && !/^```|^#{1,6}\s|^\s*([-*]|\d+\.)\s/.test(lns[i])) para.push(lns[i++]);
       out.push('<p>' + inline(para.join('\n')).replace(/\n/g, '<br>') + '</p>');
     }
     return out.join('');
@@ -312,159 +411,204 @@ table.net th { color: var(--dim); font-size: .78rem; }
 
   // ══ garden ══
   var seedQ = '', seedFrom = 'all';
-  function price(m) { if (m.free) return 'free'; if (!m.price || m.price.in == null) return ''; return '$' + (+m.price.in).toFixed(2) + ' / $' + (+m.price.out).toFixed(2) + ' per million'; }
+  function price(m) { if (m.provider === 'ollama') return 'free · no limits'; if (m.free) return 'free'; if (!m.price || m.price.in == null) return ''; return '$' + (+m.price.in).toFixed(2) + ' / $' + (+m.price.out).toFixed(2) + ' per M'; }
+  function provName(id) { return (S.providers.filter(function (p) { return p.id === id; })[0] || {}).name || id; }
   function gardenView() {
-    var html = '<div class="head"><h1>Your garden</h1></div><p class="lede">These are the models you ask. The highlighted one answers by default; Ctrl+G in tot asks them all at once.</p>';
-    html += S.garden.length ? '<div class="beds">' + S.garden.map(function (m, i) {
-      return '<div class="bed' + (m.current ? ' cur' : '') + '"><canvas data-plant="' + m.plant + '"></canvas><b title="' + esc(m.id) + '">' + esc(m.name) + '</b><small>' + esc(((S.providers.filter(function (p) { return p.id === m.provider; })[0] || {}).name || m.provider) + (price(m) ? ' · ' + price(m) : '')) + '</small>' +
-        '<div class="acts">' + (m.current ? '<span class="chip ok">answers by default</span>' : '<button class="btn" data-g="use" data-i="' + i + '">Use first</button>') + '<button class="btn quiet" data-g="up" data-i="' + i + '" aria-label="Move up">↑</button><button class="btn quiet" data-g="down" data-i="' + i + '" aria-label="Move down">↓</button><button class="btn quiet bad" data-g="remove" data-i="' + i + '">Uproot</button></div></div>';
-    }).join('') + '</div>' : '<div class="empty" style="padding:20px">Nothing planted yet. Add a key (Keys) or download a model (This computer), then plant from the list below.</div>';
-    html += '<h2 style="font-size:1.3rem;margin:0 0 10px">Plant more</h2>';
-    if (!models) return html + '<div class="empty">Looking at what your keys can reach…</div>';
-    var have = {}; S.garden.forEach(function (m) { have[m.provider + ':' + m.id] = 1; });
-    var provs = {}; models.forEach(function (m) { provs[m.provider] = 1; });
-    html += '<div class="filters"><input class="field" id="sq" placeholder="Search models (claude, llama, qwen…)" value="' + esc(seedQ) + '">' +
-      ['all'].concat(Object.keys(provs)).map(function (p) { return '<button class="btn quiet" data-from="' + p + '" aria-pressed="' + (seedFrom === p) + '">' + esc(p === 'all' ? 'Everything' : (S.providers.filter(function (x) { return x.id === p; })[0] || {}).name || p) + '</button>'; }).join('') +
-      '<button class="btn quiet" id="refreshModels">Refresh</button></div>';
-    if (modelErr.length) html += '<p class="msg bad">' + modelErr.map(esc).join('<br>') + '</p>';
-    var q = seedQ.toLowerCase();
-    var list = models.filter(function (m) { return (seedFrom === 'all' || m.provider === seedFrom) && (!q || (m.name + ' ' + m.id).toLowerCase().indexOf(q) >= 0); }).slice(0, 80);
-    if (!models.length) return html + '<div class="empty">No models yet: add a key on the Keys page, or start Ollama.</div>';
-    html += '<div class="seeds">' + list.map(function (m, i) {
-      var k = m.provider + ':' + m.id;
-      return '<div class="seed"><canvas data-plant="' + m.plant + '"></canvas><div style="min-width:0"><b>' + esc(m.name) + '</b><small>' + esc(m.id) + '</small></div><span class="price">' + esc(price(m)) + '</span>' +
-        (have[k] ? '<span class="chip ok">planted</span>' : '<button class="btn" data-plant-i="' + i + '">Plant</button>') + '</div>';
-    }).join('') + '</div>';
-    wire._seeds = list;
+    var beds = S.garden.length ? '<div class="beds">' + S.garden.map(function (m, i) {
+      var via = m.provider === 'ollama' ? 'on this computer' : 'via ' + provName(m.provider);
+      return '<div class="bed' + (m.current ? ' cur' : '') + '">' + plantTag(m.plant) + '<b title="' + esc(m.id) + '">' + esc(m.name) + '</b><small>' + esc((m.maker ? m.maker + ' · ' : '') + via) + '</small><small class="faint">' + esc(price(m)) + '</small>' +
+        '<div class="acts">' + (m.current ? '<span class="pill ok">answers first</span>' : '<button class="mini" data-g="use" data-i="' + i + '">answer first</button>') + '<button class="mini" data-g="up" data-i="' + i + '" aria-label="Move up">↑</button><button class="mini" data-g="down" data-i="' + i + '" aria-label="Move down">↓</button><button class="mini bad" data-g="remove" data-i="' + i + '">uproot</button></div></div>';
+    }).join('') + '</div>' : '<p class="empty">Nothing planted yet. Free models: the free models tab. The big ones: add a key on the keys tab.</p>';
+    var html = box('w12', 'your garden', S.garden.length + ' planted', '<p class="note">The first one answers unless you pick another. If it\'s busy or over its limit, the next one stands in' + (S.settings.fallback ? '' : ' (stand-ins are off in settings)') + '. Ctrl+G in tot asks them all at once.</p>' + beds);
+    var inner;
+    if (!models) inner = '<p class="empty">Looking at what your keys can reach…</p>';
+    else if (!models.length) inner = '<p class="empty">No models yet: add a key on the keys tab, or download a free one.</p>';
+    else {
+      var have = {}; S.garden.forEach(function (m) { have[m.provider + ':' + m.id] = 1; });
+      var provs = {}; models.forEach(function (m) { provs[m.provider] = 1; });
+      var q = seedQ.toLowerCase();
+      var list = models.filter(function (m) { return (seedFrom === 'all' || m.provider === seedFrom) && (!q || (m.name + ' ' + m.id).toLowerCase().indexOf(q) >= 0); }).slice(0, 100);
+      wire._seeds = list;
+      inner = '<div class="filters"><span class="prompt">›</span><input class="field" id="sq" placeholder="search: claude, llama, qwen…" value="' + esc(seedQ) + '">' +
+        ['all'].concat(Object.keys(provs)).map(function (p) { return '<button class="mini" data-from="' + p + '" aria-pressed="' + (seedFrom === p) + '">' + esc(p === 'all' ? 'everything' : provName(p)) + '</button>'; }).join('') + '</div>' +
+        (modelErr.length ? '<p class="msg bad">' + modelErr.map(esc).join('<br>') + '</p>' : '') +
+        '<div class="rows seeds">' + list.map(function (m, i) {
+          return '<div class="seed">' + plantTag(m.plant) + '<div style="min-width:0"><b>' + esc(m.name) + '</b><small>' + esc(m.id) + '</small></div><span class="price">' + esc(price(m)) + '</span>' +
+            (have[m.provider + ':' + m.id] ? '<span class="pill ok">planted</span>' : '<button class="mini go" data-plant-i="' + i + '">plant</button>') + '</div>';
+        }).join('') + '</div>';
+    }
+    html += box('w12', 'plant more', models ? models.length + ' models <button class="mini" id="refreshModels">refresh</button>' : '', inner);
     return html;
   }
   wire.garden = function () {
     document.querySelectorAll('[data-g]').forEach(function (b) { b.onclick = function () { var m = S.garden[Number(b.dataset.i)]; api('garden', { body: { action: b.dataset.g, provider: m.provider, id: m.id } }).then(function (s) { S = s; render(); }); }; });
     document.querySelectorAll('[data-plant-i]').forEach(function (b) { b.onclick = function () { var m = wire._seeds[Number(b.dataset.plantI)]; api('garden', { body: { action: 'add', provider: m.provider, id: m.id, name: m.name, price: m.price, free: m.free } }).then(function (s) { S = s; render(); }); }; });
     document.querySelectorAll('[data-from]').forEach(function (b) { b.onclick = function () { seedFrom = b.dataset.from; render(); }; });
-    var q = $('sq'); if (q) q.oninput = function () { seedQ = q.value; var pos = q.selectionStart; render(); var n = $('sq'); n.focus(); n.setSelectionRange(pos, pos); };
+    var q = $('sq'); if (q) q.oninput = function () { seedQ = q.value; render(); };
     var r = $('refreshModels'); if (r) r.onclick = function () { models = null; render(); api('models?fresh=1').then(function (x) { models = x.list; modelErr = x.errors; render(); }); };
   };
 
-  // ══ keys ══
-  function keysView() {
-    var html = '<div class="head"><h1>Keys</h1></div><p class="lede">A key lets Tree of Thought talk to an AI service for you. Keys stay in ~/.tot/keys.json on this computer, and this page never shows them back. If a service\'s website is blocked where you are, the Network check page shows which ones work, and models on This computer need no key at all.</p><div class="cards">';
-    html += S.providers.map(function (p) {
-      if (p.noKey) return '<div class="card"><h3>' + esc(p.name) + ' <span class="chip ok">no key needed</span></h3><p>' + esc(p.about) + '.</p><button class="btn" data-tabgo="computer">Open This computer</button></div>';
-      var custom = p.custom ? '<p style="margin-bottom:6px">Address (it ends in /v1 for most services):</p><div class="row" style="margin-bottom:10px"><input class="field" id="customBase" placeholder="https://example.com/v1" value="' + esc(S.settings.customBase) + '"><button class="btn" id="saveBase">Save</button></div>' : '';
-      return '<div class="card"><h3>' + esc(p.name) + (p.hasKey ? ' <span class="chip ok">key saved</span>' : '') + '</h3><p>' + esc(p.about) + '.' + (p.keyUrl ? ' Get a key at <a href="' + esc(p.keyUrl) + '" target="_blank" rel="noopener">' + esc(p.keyUrl.replace(/^https:\/\//, '')) + '</a>.' : '') + '</p>' + custom +
-        '<div class="row"><input class="field" type="password" autocomplete="off" placeholder="' + (p.hasKey ? 'paste a new key to replace it' : 'paste your key') + '" data-key="' + p.id + '"><button class="btn go" data-save="' + p.id + '">Save</button>' + (p.hasKey ? '<button class="btn quiet bad" data-del="' + p.id + '">Remove</button>' : '') + '</div><div class="msg" id="km-' + p.id + '"></div></div>';
-    }).join('');
-    return html + '</div>';
-  }
-  wire.keys = function () {
-    document.querySelectorAll('[data-save]').forEach(function (b) {
-      b.onclick = function () {
-        var id = b.dataset.save, input = document.querySelector('[data-key="' + id + '"]'), msg = $('km-' + id);
-        if (!input.value.trim()) { msg.className = 'msg bad'; msg.textContent = 'Paste a key first.'; return; }
-        msg.className = 'msg'; msg.textContent = 'Checking it…'; b.disabled = true;
-        api('keys', { body: { provider: id, key: input.value } }).then(function (s) { S = s; models = null; render(); var m = $('km-' + id); if (m) m.textContent = 'Saved. Plant its models on the Garden page.'; }, function (e) { b.disabled = false; msg.className = 'msg bad'; msg.textContent = e.message; });
-      };
-    });
-    document.querySelectorAll('[data-del]').forEach(function (b) { b.onclick = function () { if (confirm('Remove this key from this computer?')) api('keys', { body: { provider: b.dataset.del, key: '' } }).then(function (s) { S = s; models = null; render(); }); }; });
-    document.querySelectorAll('[data-tabgo]').forEach(function (b) { b.onclick = function () { go(b.dataset.tabgo); }; });
-    var sb = $('saveBase'); if (sb) sb.onclick = function () { api('settings', { body: { customBase: $('customBase').value.trim() } }).then(function (s) { S = s; render(); }, function (e) { alert(e.message); }); };
-  };
-
-  // ══ this computer (Ollama) ══
-  var EXAMPLES = ['llama3.2', 'gemma3:4b', 'qwen3:4b', 'phi4-mini', 'deepseek-r1:7b', 'mistral'];
+  // ══ free models (this computer, through Ollama) ══
   function computerView() {
-    var html = '<div class="head"><h1>This computer</h1></div><p class="lede">Models from Ollama run right here: free, private, and they work with no internet at all, so nothing can block them. Smaller ones (2-5 GB) run well on most laptops.</p>';
-    if (ollama === undefined) return html + '<div class="empty">Looking for Ollama…</div>';
-    if (ollama === null) return html + '<div class="card" style="max-width:640px"><h3>Ollama isn\'t running</h3><p>1. Download it from <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a> (if that site is blocked where you are, do this at home).<br>2. Open the Ollama app once.<br>3. Come back here and press Look again.</p><button class="btn go" id="olAgain">Look again</button></div>';
-    var have = {}; S.garden.forEach(function (m) { have[m.provider + ':' + m.id] = 1; });
-    html += '<div class="card" style="max-width:760px;margin-bottom:16px"><h3>Download a model</h3><p>Type a name from <a href="https://ollama.com/library" target="_blank" rel="noopener">ollama.com/library</a>, for example:</p><div class="row"><input class="field" id="olName" placeholder="llama3.2" value="' + esc(pulling ? pulling.name : '') + '"><button class="btn go" id="olPull"' + (pulling && !pulling.done ? ' disabled' : '') + '>Download</button></div>' +
-      '<div class="suggest">' + EXAMPLES.map(function (e) { return '<button data-ex="' + e + '">' + e + '</button>'; }).join('') + '</div>' +
-      (pulling ? '<div class="bar"><i style="width:' + (pulling.total ? Math.round(100 * pulling.done / pulling.total) : pulling.ok ? 100 : 3) + '%"></i></div><div class="msg' + (pulling.err ? ' bad' : '') + '">' + esc(pulling.err || pulling.status || '') + (pulling.total ? ' · ' + size(pulling.done) + ' of ' + size(pulling.total) : '') + '</div>' : '') + '</div>';
-    html += '<h2 style="font-size:1.3rem;margin:0 0 10px">On this computer</h2>';
-    if (!ollama.length) return html + '<div class="empty">Nothing downloaded yet.</div>';
-    return html + '<div class="seeds">' + ollama.map(function (m, i) {
-      var k = 'ollama:' + m.name;
-      return '<div class="seed"><canvas data-plant="acorn"></canvas><div style="min-width:0"><b>' + esc(m.name) + '</b><small>' + esc(m.family) + '</small></div><span class="price">' + size(m.size) + '</span><span class="row">' +
-        (have[k] ? '<span class="chip ok">planted</span>' : '<button class="btn" data-olplant="' + i + '">Plant</button>') + '<button class="btn quiet bad" data-oldel="' + i + '">Delete</button></span></div>';
-    }).join('') + '</div>';
+    var c = S.computer;
+    var have = {}; (ollama || []).forEach(function (m) { have[m.name] = m; });
+    var planted = {}; S.garden.forEach(function (m) { planted[m.provider + ':' + m.id] = 1; });
+    var intro = '<p class="note">Models that run on your own computer are free with <b>no limits</b>, private (nothing leaves this computer), and work without internet, so no network can block them. They use Ollama, a free app.</p>';
+    if (ollama === undefined) return box('w12', 'free models', '', intro + '<p class="empty">Looking for Ollama…</p>');
+    if (ollama === null) return box('w12', 'free models', '<span class="pill warn">Ollama isn\'t running</span>', intro +
+      '<ol class="md"><li>Download Ollama: <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a> (if that site is blocked where you are, do this at home)</li><li>Open it once. On a Mac a little llama appears at the top of the screen.</li><li>Come back and press <button class="mini go" id="olAgain">look again</button></li></ol>');
+    var picks = c.picks.map(function (p, i) {
+      var got = have[p.name];
+      return '<div class="seed">' + plantTag(p.plant || 'acorn') + '<div style="min-width:0"><b>' + esc(p.name) + (i === 0 ? ' <span class="pill ok">best fit</span>' : '') + '</b><small>' + esc(p.about) + '</small></div><span class="price">about ' + p.gb + ' GB</span>' +
+        (got ? (planted['ollama:' + p.name] ? '<span class="pill ok">planted</span>' : '<button class="mini go" data-olplant="' + esc(p.name) + '">plant</button>') : '<button class="mini go" data-pull="' + esc(p.name) + '"' + (pulling && !pulling.over ? ' disabled' : '') + '>download</button>') + '</div>';
+    }).join('');
+    var prog = pulling ? '<div class="msg' + (pulling.err ? ' bad' : '') + '">' + esc(pulling.name) + ': ' + esc(pulling.err || pulling.status || '') + (pulling.total ? ' · ' + size(pulling.done) + ' of ' + size(pulling.total) : '') + '</div>' + (pulling.total ? '<div class="progress">' + textBar(pulling.done / pulling.total, 48) + '</div>' : '') : '';
+    var html = box('w7', 'best for this computer', 'about ' + c.memoryGB + ' GB of memory', intro + '<div class="rows seeds">' + picks + '</div>' + prog);
+    html += box('w5', 'download by name', '', '<p class="note">Any name from <a href="https://ollama.com/library" target="_blank" rel="noopener">ollama.com/library</a>, like <code>phi4-mini</code> or <code>deepseek-r1:8b</code>.</p><form class="line" id="olForm"><span class="prompt">›</span><input class="field grow" id="olName" placeholder="model name"><button class="mini go">download</button></form>');
+    html += box('w12', 'on this computer', ollama.length + ' downloaded', ollama.length ? '<div class="rows seeds">' + ollama.map(function (m) {
+      return '<div class="seed">' + plantTag(m.plant || 'acorn') + '<div style="min-width:0"><b>' + esc(m.name) + '</b><small>' + esc(m.family) + '</small></div><span class="price">' + size(m.size) + '</span><span class="line">' +
+        (planted['ollama:' + m.name] ? '<span class="pill ok">planted</span>' : '<button class="mini go" data-olplant="' + esc(m.name) + '">plant</button>') + '<button class="mini bad" data-oldel="' + esc(m.name) + '">delete</button></span></div>';
+    }).join('') + '</div>' : '<p class="empty">Nothing downloaded yet. Pick the best fit above.</p>');
+    return html;
   }
+  function textBar(part, w) { var n = Math.max(0, Math.min(w, Math.round(part * w))); return new Array(n + 1).join('█') + '<span>' + new Array(w - n + 1).join('░') + '</span>'; }
   wire.computer = function () {
     var a = $('olAgain'); if (a) a.onclick = function () { ollama = undefined; render(); api('ollama').then(function (r) { ollama = r.models; render(); }); };
-    document.querySelectorAll('[data-ex]').forEach(function (b) { b.onclick = function () { $('olName').value = b.dataset.ex; }; });
-    var p = $('olPull'); if (p) p.onclick = function () { pull($('olName').value.trim()); };
-    document.querySelectorAll('[data-olplant]').forEach(function (b) { b.onclick = function () { var m = ollama[Number(b.dataset.olplant)]; api('garden', { body: { action: 'add', provider: 'ollama', id: m.name, name: m.name, free: true } }).then(function (s) { S = s; render(); }); }; });
-    document.querySelectorAll('[data-oldel]').forEach(function (b) { b.onclick = function () { var m = ollama[Number(b.dataset.oldel)]; if (confirm('Delete ' + m.name + ' from this computer? (' + size(m.size) + ')')) api('ollama/delete', { body: { model: m.name } }).then(function () { return api('ollama'); }).then(function (r) { ollama = r.models; render(); }, function (e) { alert(e.message); }); }; });
+    document.querySelectorAll('[data-pull]').forEach(function (b) { b.onclick = function () { pull(b.dataset.pull); }; });
+    var f = $('olForm'); if (f) f.onsubmit = function (e) { e.preventDefault(); pull($('olName').value.trim()); };
+    document.querySelectorAll('[data-olplant]').forEach(function (b) { b.onclick = function () { api('garden', { body: { action: 'add', provider: 'ollama', id: b.dataset.olplant, name: b.dataset.olplant, free: true } }).then(function (s) { S = s; render(); }); }; });
+    document.querySelectorAll('[data-oldel]').forEach(function (b) { b.onclick = function () { if (confirm('Delete ' + b.dataset.oldel + ' from this computer?')) api('ollama/delete', { body: { model: b.dataset.oldel } }).then(function () { return api('ollama'); }).then(function (r) { ollama = r.models; render(); }, function (e) { alert(e.message); }); }; });
   };
   function pull(name) {
     if (!name) return;
     pulling = { name: name, status: 'starting…', done: 0, total: 0 };
     render();
-    fetch(API + 'ollama/pull', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: name }) }).then(function (r) {
-      var reader = r.body.getReader(), dec = new TextDecoder(), buf = '';
-      function more() {
-        return reader.read().then(function (x) {
-          if (x.done) return;
-          buf += dec.decode(x.value, { stream: true });
-          var i;
-          while ((i = buf.indexOf('\n')) >= 0) {
-            var line = buf.slice(0, i); buf = buf.slice(i + 1);
-            if (!line.trim()) continue;
-            var j; try { j = JSON.parse(line); } catch (e) { continue; }
-            if (j.error) { pulling.err = j.error; pulling.done = pulling.total = 0; }
-            else if (j.status === 'success') { pulling.ok = true; pulling.status = 'Done. Plant it below to ask it questions.'; pulling.total = 0; }
-            else { pulling.status = j.status; if (j.total) { pulling.total = j.total; pulling.done = j.done; } }
-          }
-          if (tab === 'computer') render();
-          return more();
-        });
-      }
-      return more();
-    }).then(function () { pulling.done = pulling.done || 0; return api('ollama'); }).then(function (r) { ollama = r.models; pulling.done = true; if (tab === 'computer') render(); }, function (e) { pulling.err = e.message; render(); });
+    lines('ollama/pull', { model: name }, function (j) {
+      if (j.error) { pulling.err = j.error; pulling.total = 0; }
+      else if (j.status === 'success') { pulling.status = 'done: plant it to start asking'; pulling.total = 0; }
+      else { pulling.status = j.status; if (j.total) { pulling.total = j.total; pulling.done = j.done; } }
+      if (tab === 'computer') render();
+    }).then(function () { pulling.over = true; return api('ollama'); }).then(function (r) {
+      ollama = r.models;
+      if (!pulling.err) return api('garden', { body: { action: 'add', provider: 'ollama', id: name, name: name, free: true } }).then(function (s) { S = s; pulling.status = 'done, and planted in your garden'; });
+    }).then(function () { if (tab === 'computer') render(); }, function (e) { pulling.over = true; pulling.err = e.message; render(); });
   }
+
+  // ══ projects ══
+  var openProject = null;
+  function projectsView() {
+    var cur = S.projects.filter(function (p) { return p.id === (openProject || S.project); })[0] || S.projects[0];
+    var left = '<p class="note">For long work: a project keeps its chats together, and every model in it reads the project\'s instructions and pinned files first.</p>' +
+      (S.projects.length ? '<div class="rows">' + S.projects.map(function (p) { return '<button class="citem" data-proj="' + p.id + '" aria-current="' + !!(cur && cur.id === p.id) + '"><b>' + esc(p.name) + '</b><time>' + (S.project === p.id ? 'in use' : '') + '</time><small>' + (p.files.length ? p.files.length + ' pinned file' + (p.files.length === 1 ? '' : 's') : 'no files') + '</small></button>'; }).join('') + '</div>' : '') +
+      '<form class="line" id="pNew" style="margin-top:1em"><span class="prompt">+</span><input class="field grow" id="pName" placeholder="new project name"><button class="mini go">make</button></form>';
+    var html = box('w4', 'projects', S.projects.length + '', left);
+    if (!cur) return html + box('w8', 'project', '', '<p class="empty">Make a project on the left: like "Science fair" or "College essays".</p>');
+    var files = cur.files.length ? '<div class="rows">' + cur.files.map(function (f) { return '<div class="line"><span class="grow" title="' + esc(f) + '">' + esc(f) + '</span><button class="mini bad" data-unpin="' + esc(f) + '">unpin</button></div>'; }).join('') + '</div>' : '<p class="empty">None yet.</p>';
+    html += box('w8', esc(cur.name), (S.project === cur.id ? '<span class="pill ok">in use in tot</span><button class="mini" id="pLeave">stop using</button>' : '<button class="mini go" id="pUse">use in tot</button>') + '<button class="mini bad" id="pDel">delete</button>',
+      '<label class="dim" for="pInst">Instructions every model gets in this project</label><textarea class="field" id="pInst" rows="5" placeholder="What it is, how you like answers, what to avoid.">' + esc(cur.instructions) + '</textarea><div class="line"><button class="mini go" id="pSave">save</button><span class="msg" id="pMsg"></span></div>' +
+      '<h3 class="blossom" style="font-size:1em;margin:1.4em 0 .4em">Pinned files <span class="faint" style="font-weight:400">re-read before every answer, so edits show up</span></h3>' + files +
+      '<form class="line" id="pPin" style="margin-top:.8em"><span class="prompt">+</span><input class="field grow" id="pFile" placeholder="/path/to/a/file.md"><button class="mini go">pin</button></form><div class="msg" id="pinMsg"></div>');
+    wire._project = cur;
+    return html;
+  }
+  wire.projects = function () {
+    var cur = wire._project;
+    var pa = function (body, after) { return api('projects', { body: body }).then(function (s) { S = s; render(); if (after) after(); }, function (e) { var m = $('pinMsg') || $('pMsg'); if (m) { m.className = 'msg bad'; m.textContent = e.message; } }); };
+    document.querySelectorAll('[data-proj]').forEach(function (b) { b.onclick = function () { openProject = b.dataset.proj; render(); }; });
+    $('pNew').onsubmit = function (e) { e.preventDefault(); var n = $('pName').value.trim(); if (n) pa({ action: 'add', name: n }, function () { openProject = S.projects[S.projects.length - 1].id; render(); }); };
+    if (!cur) return;
+    $('pSave').onclick = function () { pa({ action: 'save', id: cur.id, instructions: $('pInst').value }, function () { var m = $('pMsg'); if (m) m.textContent = 'Saved.'; }); };
+    $('pPin').onsubmit = function (e) { e.preventDefault(); var f = $('pFile').value.trim(); if (f) pa({ action: 'pin', id: cur.id, file: f }); };
+    document.querySelectorAll('[data-unpin]').forEach(function (b) { b.onclick = function () { pa({ action: 'unpin', id: cur.id, file: b.dataset.unpin }); }; });
+    var x = $('pUse'); if (x) x.onclick = function () { pa({ action: 'use', id: cur.id }); };
+    x = $('pLeave'); if (x) x.onclick = function () { pa({ action: 'leave', id: cur.id }); };
+    $('pDel').onclick = function () { if (confirm('Delete the project "' + cur.name + '"? Its chats are kept.')) { openProject = null; pa({ action: 'delete', id: cur.id }); } };
+  };
+
+  // ══ usage ══
+  function usageView() {
+    if (!usage) return box('w12', 'usage', '', '<p class="empty">Adding it up…</p>');
+    if (!usage.length) return box('w12', 'usage', '', '<p class="empty">Nothing yet: ask something first.</p>');
+    var max = Math.max.apply(null, usage.map(function (r) { return r.in + r.out; })) || 1;
+    var cost = usage.reduce(function (a, r) { return a + r.cost; }, 0);
+    var answers = usage.reduce(function (a, r) { return a + r.answers; }, 0);
+    var rows = usage.map(function (r) {
+      var plant = (S.garden.filter(function (g) { return g.provider + ':' + g.id === r.model; })[0] || {}).plant;
+      return '<tr><td>' + plantTag(plant || (r.model.indexOf('ollama:') === 0 ? 'acorn' : 'sprout')) + ' ' + esc(r.name) + '</td><td>' + r.answers + '</td><td>' + num(r.in) + '</td><td>' + num(r.out) + '</td><td>' + (r.cost ? '$' + r.cost.toFixed(4) : r.model.indexOf('ollama:') === 0 ? 'free' : '-') + '</td><td class="tbar">' + textBar((r.in + r.out) / max, 24) + '</td></tr>';
+    }).join('');
+    return box('w12', 'usage', answers + ' answers' + (cost ? ' · $' + cost.toFixed(4) + ' reported' : ''),
+      '<p class="note">Counted in tokens (a token is about ¾ of a word). Services that report a cost (OpenRouter does) show it; models on this computer are always free.</p><table><thead><tr><th>model</th><th>answers</th><th>tokens in</th><th>out</th><th>cost</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>');
+  }
+
+  // ══ keys ══
+  function keysView() {
+    var rows = S.providers.filter(function (p) { return !p.noKey; }).map(function (p) {
+      var custom = p.custom ? '<form class="line" data-base style="margin-bottom:.4em"><span class="dim">address</span><input class="field grow" id="customBase" placeholder="https://example.com/v1" value="' + esc(S.settings.customBase) + '"><button class="mini">save</button></form>' : '';
+      return '<tr><td><b>' + esc(p.name) + '</b><br><span class="faint">' + esc(p.about) + '</span></td><td>' + (p.hasKey ? '<span class="pill ok">saved</span>' : p.keyUrl ? '<a href="' + esc(p.keyUrl) + '" target="_blank" rel="noopener">get one</a>' : '') + '</td><td style="min-width:30ch">' + custom +
+        '<form class="line" data-keyform="' + p.id + '"><span class="prompt">›</span><input class="field grow" type="password" autocomplete="off" placeholder="' + (p.hasKey ? 'paste a new key to replace it' : 'paste your key') + '" data-key="' + p.id + '"><button class="mini go">save</button>' + (p.hasKey ? '<button type="button" class="mini bad" data-del="' + p.id + '">remove</button>' : '') + '</form><div class="msg" id="km-' + p.id + '"></div></td></tr>';
+    }).join('');
+    return box('w12', 'keys', 'kept in ~/.tot/keys.json, never shown here', '<p class="note">A key lets Tree of Thought talk to an AI service for you. OpenRouter is the easy one: one key, every big model. Free and unlimited needs no key at all: see the free models tab.</p><table><thead><tr><th>service</th><th></th><th>key</th></tr></thead><tbody>' + rows + '</tbody></table>');
+  }
+  wire.keys = function () {
+    document.querySelectorAll('[data-keyform]').forEach(function (f) {
+      f.onsubmit = function (e) {
+        e.preventDefault();
+        var id = f.dataset.keyform, input = f.querySelector('input'), msg = $('km-' + id), btn = f.querySelector('.go');
+        if (!input.value.trim()) { msg.className = 'msg bad'; msg.textContent = 'Paste a key first.'; return; }
+        msg.className = 'msg'; msg.textContent = 'Checking it…'; btn.disabled = true;
+        api('keys', { body: { provider: id, key: input.value } }).then(function (s) { S = s; models = null; render(); var m = $('km-' + id); if (m) m.textContent = 'Saved. Plant its models on the garden tab.'; }, function (er) { btn.disabled = false; msg.className = 'msg bad'; msg.textContent = er.message; });
+      };
+    });
+    document.querySelectorAll('[data-del]').forEach(function (b) { b.onclick = function () { if (confirm('Remove this key from this computer?')) api('keys', { body: { provider: b.dataset.del, key: '' } }).then(function (s) { S = s; models = null; render(); }); }; });
+    var sb = document.querySelector('[data-base]'); if (sb) sb.onsubmit = function (e) { e.preventDefault(); api('settings', { body: { customBase: $('customBase').value.trim() } }).then(function (s) { S = s; render(); }, function (er) { alert(er.message); }); };
+  };
 
   // ══ network ══
   var WORDS = { ok: ['ok', 'works'], slow: ['warn', 'slow'], blocked: ['no', 'blocked'], inspected: ['warn', 'inspected'], off: ['no', 'not running'] };
-  function chipFor(s) { if (!s) return '<span class="chip">-</span>'; var w = WORDS[s] || ['', s]; return '<span class="chip ' + w[0] + '">' + w[1] + '</span>'; }
+  function chipFor(s) { if (!s) return '<span class="faint">-</span>'; var w = WORDS[s] || ['', s]; return '<span class="pill ' + w[0] + '">' + w[1] + '</span>'; }
   function networkView() {
-    var html = '<div class="head"><h1>Network check</h1><button class="btn go" id="netGo">' + (netRes === 'busy' ? 'Checking…' : 'Check this network') + '</button></div><p class="lede">Some networks (schools, offices) block some AI services. This checks which ones this computer can reach right now: the service itself, and the website where you get its key.</p>';
-    if (!netRes || netRes === 'busy') return html;
-    html += '<table class="net"><thead><tr><th>Service</th><th>Answers questions</th><th>Key website</th><th></th></tr></thead><tbody>' + netRes.map(function (r) {
-      var note = r.api === 'inspected' ? 'This network swaps secure certificates (common at schools), so the connection isn\'t trusted.' : r.api === 'blocked' ? 'Blocked or not answering here.' : r.api === 'off' ? 'Start the Ollama app.' : r.site === 'blocked' ? 'Works here, but get its key somewhere else.' : '';
-      return '<tr><td><b>' + esc(r.name) + '</b></td><td>' + chipFor(r.api) + '</td><td>' + chipFor(r.site) + '</td><td style="color:var(--dim)">' + esc(note) + '</td></tr>';
-    }).join('') + '</tbody></table>';
-    var ok = netRes.filter(function (r) { return r.api === 'ok' && r.id !== 'ollama'; }).map(function (r) { return r.name; });
-    html += '<p class="lede" style="margin-top:18px">' + (ok.length ? 'On this network you can use: <b>' + esc(ok.join(', ')) + '</b>. Keys you saved at home work here too.' : 'No online service gets through here. Models on This computer still work, because they don\'t need the internet.') + '</p>';
-    return html;
+    var inner = '<p class="note">Some networks (schools, offices) block some AI services. This checks which ones this computer can reach right now: the service itself, and the website where you get its key.</p>';
+    if (netRes && netRes !== 'busy') {
+      inner += '<table><thead><tr><th>service</th><th>answers questions</th><th>key website</th><th></th></tr></thead><tbody>' + netRes.map(function (r) {
+        var note = r.api === 'inspected' ? 'This network swaps secure certificates (common at schools), so the connection isn\'t trusted.' : r.api === 'blocked' ? 'Blocked or not answering here.' : r.api === 'off' ? 'Start the Ollama app.' : r.site === 'blocked' ? 'Works here; get its key somewhere else.' : '';
+        return '<tr><td>' + esc(r.name) + '</td><td>' + chipFor(r.api) + '</td><td>' + chipFor(r.site) + '</td><td class="dim">' + esc(note) + '</td></tr>';
+      }).join('') + '</tbody></table>';
+      var ok = netRes.filter(function (r) { return r.api === 'ok' && r.id !== 'ollama'; }).map(function (r) { return r.name; });
+      inner += '<p class="note" style="margin-top:1em">' + (ok.length ? 'On this network you can use: <b>' + esc(ok.join(', ')) + '</b>. Keys you saved at home work here too.' : 'No online service gets through here. Free models on this computer still work: they don\'t need the internet.') + '</p>';
+    }
+    return box('w12', 'network check', '<button class="mini go" id="netGo"' + (netRes === 'busy' ? ' disabled' : '') + '>' + (netRes === 'busy' ? 'checking…' : 'check this network') + '</button>', inner);
   }
   wire.network = function () { $('netGo').onclick = function () { netRes = 'busy'; render(); api('network').then(function (r) { netRes = r; render(); }, function (e) { netRes = null; render(); alert(e.message); }); }; };
 
   // ══ settings ══
   function settingsView() {
-    var html = '<div class="head"><h1>Settings</h1></div><p class="lede">These match the Tab menu in tot.</p>';
-    html += '<h3 style="margin:0 0 10px">Colours</h3><div class="swatches">' + Object.keys(S.themes).map(function (k) {
+    var sw = '<div class="swatches">' + Object.keys(S.themes).map(function (k) {
       var t = S.themes[k];
-      return '<button class="swatch" data-theme="' + k + '" aria-pressed="' + (S.settings.theme === k) + '" style="background:' + t.paper.bg + ';color:' + t.paper.fg + '"><span><i style="background:' + t.leaf + '"></i><i style="background:' + t.blossom + '"></i><i style="background:' + t.bark + '"></i><i style="background:' + t.sun + '"></i></span><b style="text-transform:capitalize">' + k + '</b><br><small style="opacity:.75">' + esc(t.about) + '</small></button>';
+      return '<button class="swatch" data-theme="' + k + '" aria-pressed="' + (S.settings.theme === k) + '" style="background:' + t.paper.bg + ';color:' + t.paper.fg + '"><span><i style="background:' + t.leaf + '"></i><i style="background:' + t.blossom + '"></i><i style="background:' + t.bark + '"></i><i style="background:' + t.sun + '"></i></span><b>' + k + '</b><br><small style="opacity:.75">' + esc(t.about) + '</small></button>';
     }).join('') + '</div>';
-    html += '<h3 style="margin:26px 0 6px">Instructions for every model</h3><p class="lede" style="margin-bottom:8px">Like "Answer briefly. I\'m learning to program."</p><textarea class="field" id="sys" rows="4" style="max-width:720px">' + esc(S.settings.system) + '</textarea><div class="row" style="margin-top:8px"><button class="btn go" id="saveSys">Save</button><span class="msg" id="sysMsg"></span></div>';
-    html += '<h3 style="margin:26px 0 6px">Thinking</h3><label class="row" style="color:var(--dim)"><input type="checkbox" id="thoughts"' + (S.settings.thoughts ? ' checked' : '') + '> Show what thinking models are thinking while they answer</label>';
+    var html = box('w6', 'colours', 'the terminal uses them too', sw);
+    html += box('w6', 'answers', '',
+      '<label class="check"><input type="checkbox" id="fallback"' + (S.settings.fallback ? ' checked' : '') + '> <span><b style="color:var(--fg)">Stand-ins.</b> When a model is busy, over its limit or unreachable, the next one in your garden answers instead (free models on this computer first).</span></label>' +
+      '<label class="check"><input type="checkbox" id="thoughts"' + (S.settings.thoughts ? ' checked' : '') + '> <span><b style="color:var(--fg)">Show thinking.</b> See what thinking models think while they answer.</span></label>');
+    html += box('w12', 'instructions for every model', '', '<p class="note">Like "Answer briefly. I\'m learning to program." Projects can add their own on top.</p><textarea class="field" id="sys" rows="4">' + esc(S.settings.system) + '</textarea><div class="line"><button class="mini go" id="saveSys">save</button><span class="msg" id="sysMsg"></span></div>');
     return html;
   }
   wire.settings = function () {
     document.querySelectorAll('[data-theme]').forEach(function (b) { b.onclick = function () { api('settings', { body: { theme: b.dataset.theme } }).then(function (s) { S = s; applyTheme(); render(); }); }; });
     $('saveSys').onclick = function () { api('settings', { body: { system: $('sys').value } }).then(function (s) { S = s; $('sysMsg').textContent = 'Saved.'; }); };
     $('thoughts').onchange = function () { api('settings', { body: { thoughts: this.checked } }).then(function (s) { S = s; }); };
+    $('fallback').onchange = function () { api('settings', { body: { fallback: this.checked } }).then(function (s) { S = s; }); };
   };
 
   // ── off we go ──
   api('state').then(function (s) {
     S = s;
-    $('ver').textContent = 'dashboard · v' + s.version;
+    $('ver').textContent = 'v' + s.version;
     applyTheme();
     var h = location.hash.slice(1);
-    go(['chats', 'garden', 'keys', 'computer', 'network', 'settings'].indexOf(h) >= 0 ? h : 'chats');
+    go(['chats', 'garden', 'computer', 'projects', 'usage', 'keys', 'network', 'settings'].indexOf(h) >= 0 ? h : 'chats');
     api('chats').then(function (l) { chatList = l; if (l.length && !chat) openChat(l[0].id); });
-  }, function (e) { $('main').innerHTML = '<div class="empty">' + esc(e.message) + '</div>'; });
+  }, function (e) { $('main').innerHTML = '<p class="empty">' + esc(e.message) + '</p>'; });
 })();
 </script>
 </body>

@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.0
+- Quick questions: `tot what is osmosis?` answers right in your terminal, with follow-ups, files (`-f`) and piping. Saved as chats.
+- Free with no limits: `tot free` (or Tab → Get a free model for this computer) picks the model that fits your computer's memory and downloads it with Ollama.
+- Stand-ins: if a model is busy, over its limit or unreachable, the next one in your garden answers (models on this computer first), and you're told.
+- Projects: their own instructions, pinned files (re-read every time) and chats. `/project`, `/pin`.
+- Attach files to a question (`/file`, or drag a file into the window), save answers (`/save`, `/save code`), search every chat (`/find`), usage per model (`/usage`).
+- Long chats are trimmed to what a model can read, keeping your first message and the newest ones.
+- Each plant now shows who made the model (Anthropic, Google, Meta…) and where it runs.
+- Ctrl+B hides the garden sidebar. The menu can be searched by typing.
+- Tab → Tidy a folder opens tidy (or installs it).
+- The dashboard has a new look, matching gossip's: a quick-question bar, free models, projects, usage and chat search.
+
 ## 1.1.0
 - The dashboard (`tot dashboard`, or Tab → Open the dashboard): chats drawn as trees, the garden, keys, settings, and models on this computer, in your browser.
 - Network check (`tot check`): which AI services, and which key websites, this network lets through. Handy on school or office Wi-Fi.

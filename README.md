@@ -41,9 +41,41 @@ irm https://djp7.pythonanywhere.com/tot/install.ps1 | iex
 (Or straight from GitHub: `curl -fsSL https://raw.githubusercontent.com/dpatel7-dev/Tree-Of-Thought/main/install.sh | sh`.)
 Nothing to set up beforehand: if you don't have Node.js 18+, the installer puts a private copy inside `~/.tot`.
 
+## Quick questions
+
+Don't need the whole garden? Just ask from any terminal:
+
+```sh
+tot what is osmosis?
+tot -m claude "rewrite this sentence to sound friendlier: ..."
+cat notes.md | tot summarise this in five bullet points
+```
+
+The answer prints right there. Ask a follow-up, or press Enter to finish. Every
+quick question is saved as a chat, so it's in your garden later. The dashboard
+has the same quick-question bar at the top.
+
+## Free, with no limits
+
+Models that run on **your own computer** are free, have no limits at all, keep
+everything private and work without internet (so no network can block them):
+
+1. Install [Ollama](https://ollama.com/download) (a free app) and open it once.
+2. Run `tot free` (or **Tab → Get a free model for this computer**).
+
+Tree of Thought checks how much memory your computer has and downloads the
+model that fits it best (for example `gemma3:4b` on an 8 GB Mac, `qwen3:8b` on
+16 GB, `gpt-oss:20b` on 32 GB).
+
+There's no honest way to use Claude or GPT for free without limits: online
+services always have limits or cost money, and "free unlimited" sites that pass
+your questions through someone else's account are borrowing access they don't
+own (and can read everything you send). So Tree of Thought does the next best
+thing: **stand-ins** (below), plus models on your computer that never run out.
+
 ## Plant your first models
 
-You need a key from at least one AI service. The easy one is **OpenRouter** —
+For the big online models you need a key from at least one AI service. The easy one is **OpenRouter** —
 one key reaches Claude, GPT, Gemini, Grok, DeepSeek, Llama, Mistral, Qwen and
 hundreds more:
 
@@ -83,15 +115,43 @@ Some networks block some AI services (or the websites where you get their keys).
   [Ollama](https://ollama.com/download), then `tot pull llama3.2` (or use **This computer**
   in the dashboard), and plant it in your garden.
 
+## Stand-ins: answers even when a model is busy
+
+If the model you asked is busy, over its limit (free tiers have daily limits),
+out of credit or can't be reached, the next model in your garden answers
+instead, and you're told who stepped in ("Claude hit its limit, so qwen3:8b
+answered instead"). Models on your own computer are tried first, since they
+never run out. The busy model rests for ten minutes. Turn it off in **Tab →
+Stand-ins** or the dashboard's settings.
+
+## For long projects
+
+- **Projects** (`/project Science fair`, or **Tab → Projects**): a project keeps
+  its chats together and has its own instructions, and you can **pin files** to
+  it (`/pin notes.md`). Every model reads the instructions and pinned files before
+  answering, re-reading the files each time so your edits show up.
+- **Attach files** to a question: `/file essay.md`, or just drag a file into the
+  window. Text and code files up to 200 KB.
+- **Save an answer**: `/save` writes the last answer to a Markdown file;
+  `/save code app.py` saves just its code.
+- **Search everything**: `/find mitochondria` searches every question and answer.
+- **Long chats keep working**: when a chat gets longer than a model can read,
+  the oldest messages (after your first) are left out, and you're told.
+- **Usage**: `/usage` or `tot usage` shows how much you've used each model.
+- **Ctrl+B** hides the garden for more room.
+- **tidy**: **Tab → Tidy a folder** opens [tidy](https://github.com/dpatel7-dev/tidy),
+  the AI that tidies a folder for you.
+
 ## The dashboard
 
 `tot dashboard` (or **Tab → Open the dashboard**) opens your garden in the browser:
 
-- **Chats** drawn as trees: every dot is a message, click one to read its branch.
+- **Ask**: a quick-question bar at the top (answers stream in, and are saved as chats).
+- **Chats** drawn as trees: every dot is a message, click one to read its branch. Press `/` to search every chat.
 - **Garden**: plant, uproot and reorder models, with every model your keys can reach.
-- **Keys**: paste, check and remove keys (it never shows them back).
-- **This computer**: download Ollama models and plant them.
-- **Network check** and **Settings** (colours, instructions, thinking).
+- **Free models**: the best fits for this computer, one click to download and plant.
+- **Projects**: instructions and pinned files for each project.
+- **Usage**, **Keys** (it never shows them back), **Network check** and **Settings**.
 
 It runs only on your computer, and tot picks up whatever you change there right away.
 
@@ -117,9 +177,12 @@ Commands work too: `/model gemini`, `/add`, `/key openrouter …`, `/system Answ
 ## From the shell
 
 ```sh
-tot ask "explain recursion like I'm five"
-tot ask -m gemini "and in one sentence?"
-git diff | tot ask "review this change"
+tot "explain recursion like I'm five"
+tot -m gemini "and in one sentence?"
+git diff | tot review this change
+tot -f essay.md "what's my weakest paragraph?"
+tot free            # a free model that runs on this computer
+tot usage           # how much you've used each model
 tot garden          # your models
 tot models claude   # every model your keys can use
 tot keys            # which keys are saved

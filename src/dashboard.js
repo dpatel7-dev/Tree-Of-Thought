@@ -16,6 +16,8 @@ const St = require('./store');
 const Pl = require('./plants');
 const R = require('./rowan');
 const Th = require('./theme');
+const S = require('./smart');
+const Ans = require('./answer');
 const { open: openThing } = require('./tui');
 const pkg = require('../package.json');
 
@@ -28,8 +30,11 @@ function state() {
   P.setCustomBase(cfg.customBase);
   return {
     version: pkg.version,
-    settings: { theme: cfg.theme, system: cfg.system || '', thoughts: !!cfg.thoughts, customBase: cfg.customBase || '' },
-    garden: (cfg.garden || []).map((m, i) => ({ ...m, plant: Pl.plantFor(m), current: i === (cfg.current || 0) })),
+    settings: { theme: cfg.theme, system: cfg.system || '', thoughts: !!cfg.thoughts, customBase: cfg.customBase || '', fallback: cfg.fallback !== false },
+    garden: (cfg.garden || []).map((m, i) => ({ ...m, plant: Pl.plantFor(m), maker: S.makerOf(m), current: i === (cfg.current || 0) })),
+    projects: (cfg.projects || []).map((p) => ({ ...p, files: p.files || [] })),
+    project: cfg.project || null,
+    computer: (() => { const c = S.localPicks(); c.picks = c.picks.map((x) => ({ ...x, plant: Pl.plantFor({ id: x.name, provider: 'ollama' }) })); return c; })(),
     providers: P.IDS.map((id) => ({ id, ...P.PROVIDERS[id], hasKey: !!keys[id] })),
     plants: Pl.PLANTS,
     themes: Object.fromEntries(Object.entries(Th.THEMES).map(([k, v]) => [k, { ...v, rowan: (Th.use(k), R.ink()) }])),
@@ -80,9 +85,69 @@ async function route(req, res, rest) {
     if (x[2] === '/export') { res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8', 'content-disposition': `attachment; filename="${(chat.title || 'chat').replace(/[^\w .-]+/g, '').slice(0, 40) || 'chat'}.md"` }); return res.end(St.toMarkdown(chat)); }
     const nodes = {};
     for (const [id, n] of Object.entries(chat.nodes)) nodes[id] = { ...n, plant: n.role === 'assistant' && n.model ? Pl.plantFor({ id: n.model, provider: n.provider }) : null };
-    return send({ id: chat.id, title: chat.title, created: chat.created, updated: chat.updated, leaf: chat.leaf, nodes });
+    return send({ id: chat.id, title: chat.title, created: chat.created, updated: chat.updated, leaf: chat.leaf, project: chat.project, nodes });
   }
   if (rest === '/api/models') return send(await allModels(/[?&]fresh/.test(req.url)));
+  if (rest === '/api/usage') return send(S.usage(St.chats.all()));
+  if (rest === '/api/search') return send(St.chats.search(new URL(req.url, 'http://x').searchParams.get('q') || '').slice(0, 50));
+  if (rest === '/api/projects' && m === 'POST') {
+    const b = await body(req);
+    const cfg = St.config.load();
+    cfg.projects = cfg.projects || [];
+    const pr = cfg.projects.find((p) => p.id === b.id);
+    if (b.action === 'add' && String(b.name || '').trim()) { const np = { id: crypto.randomBytes(4).toString('hex'), name: String(b.name).trim().slice(0, 40), instructions: '', files: [], made: Date.now() }; cfg.projects.push(np); }
+    else if (!pr) return send({ error: 'That project is gone.' }, 404);
+    else if (b.action === 'save') { if (typeof b.name === 'string' && b.name.trim()) pr.name = b.name.trim().slice(0, 40); if (typeof b.instructions === 'string') pr.instructions = b.instructions.slice(0, 8000); }
+    else if (b.action === 'pin') { try { const f = S.attach(String(b.file || '')); pr.files = (pr.files || []).filter((x) => x !== f.path).concat(f.path); } catch (e) { return send({ error: e.message }, 400); } }
+    else if (b.action === 'unpin') pr.files = (pr.files || []).filter((x) => x !== b.file);
+    else if (b.action === 'use') cfg.project = pr.id;
+    else if (b.action === 'delete') {
+      cfg.projects = cfg.projects.filter((p) => p !== pr);
+      if (cfg.project === pr.id) cfg.project = null;
+      for (const c of St.chats.list().filter((x) => x.project === pr.id)) { const ch = St.chats.load(c.id); if (ch) { ch.project = null; St.chats.save(ch); } }
+    }
+    if (b.action === 'leave') cfg.project = null;
+    St.config.save(cfg);
+    return send(state());
+  }
+  if (rest === '/api/ask' && m === 'POST') {
+    // a quick question from the browser: streamed back as lines of JSON, saved as a chat
+    const b = await body(req);
+    const question = String(b.question || '').trim().slice(0, 20000);
+    const cfg = St.config.load();
+    const garden = cfg.garden || [];
+    let model = garden.find((g) => keyOf(g) === b.model) || garden[cfg.current || 0];
+    if (!question) return send({ error: 'Type a question first.' }, 400);
+    if (!model) return send({ error: 'Your garden is empty: plant a model first (Garden, or This computer for a free one).' }, 400);
+    res.writeHead(200, { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store' });
+    const out = (o) => { try { res.write(JSON.stringify(o) + '\n'); } catch { /* the page went away */ } };
+    const chat = (b.chat && St.chats.load(b.chat)) || new St.Chat({ project: cfg.project || null });
+    const parent = chat.leaf || null;
+    const q = chat.add(parent, 'user', { text: question });
+    const node = chat.add(q.id, 'assistant', { model: keyOf(model), name: model.name, provider: model.provider });
+    chat.leaf = node.id;
+    const ac = new AbortController();
+    res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+    out({ type: 'model', name: model.name, maker: S.makerOf(model), plant: Pl.plantFor(model), chat: chat.id });
+    const started = Date.now();
+    try {
+      const messages = chat.path(q.id).filter((n) => n.text && !n.err).map((n) => ({ role: n.role, content: n.role === 'user' ? S.withFiles(n.text, n.files) : n.text }));
+      const r = await Ans.answer({
+        model, garden, keys: St.keys.load(), messages, system: cfg.system || undefined, signal: ac.signal, fallback: cfg.fallback !== false,
+        onText: (t) => { node.text += t; out({ type: 'text', t }); },
+        onSwitch: (next, why) => out({ type: 'switch', from: why.model.name, why: why.why, name: next.name, maker: S.makerOf(next), plant: Pl.plantFor(next) }),
+      });
+      Object.assign(node, { model: keyOf(r.model), name: r.model.name, provider: r.model.provider, usage: r.usage || undefined, took: Date.now() - started });
+      if (r.tried.length) node.note = Ans.switchNote(r.tried, r.model);
+      St.chats.save(chat);
+      out({ type: 'done', chat: chat.id, note: node.note || '' });
+    } catch (e) {
+      node.err = e.message;
+      St.chats.save(chat);
+      out({ type: 'error', error: e.name === 'AbortError' ? 'Stopped.' : e.message, chat: chat.id });
+    }
+    return res.end();
+  }
   if (rest === '/api/garden' && m === 'POST') {
     const b = await body(req);
     const cfg = St.config.load();
@@ -114,12 +179,13 @@ async function route(req, res, rest) {
     if (['grove', 'meadow', 'autumn'].includes(b.theme)) cfg.theme = b.theme;
     if (typeof b.system === 'string') cfg.system = b.system.slice(0, 4000);
     if (typeof b.thoughts === 'boolean') cfg.thoughts = b.thoughts;
+    if (typeof b.fallback === 'boolean') cfg.fallback = b.fallback;
     if (typeof b.customBase === 'string') { if (b.customBase && !/^https?:\/\/\S+$/.test(b.customBase)) return send({ error: 'The address should start with https://' }, 400); cfg.customBase = b.customBase.replace(/\/+$/, ''); }
     St.config.save(cfg);
     return send(state());
   }
   if (rest === '/api/network') { const cfg = St.config.load(); P.setCustomBase(cfg.customBase); return send(await P.checkNetwork()); }
-  if (rest === '/api/ollama') return send({ models: await P.ollamaModels() });
+  if (rest === '/api/ollama') { const list = await P.ollamaModels(); return send({ models: list && list.map((x) => ({ ...x, plant: Pl.plantFor({ id: x.name, provider: 'ollama' }) })) }); }
   if (rest === '/api/ollama/pull' && m === 'POST') {
     const b = await body(req);
     const name = String(b.model || '').trim();

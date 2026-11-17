@@ -14,8 +14,11 @@ const HELP = `
   Tree of Thought ${pkg.version} - many AI models in one terminal garden
 
   tot                          open the garden
-  tot ask "question"           ask the current model, answer printed here
-  tot ask -m gemini "question" ...or a model from your garden by name
+  tot what is osmosis?         a quick answer right here (then ask follow-ups, or Enter to finish)
+  tot -m gemini "question"     ...from a model in your garden, by name
+  tot -f notes.md "summarise"  ...with a file attached (or pipe one in: cat x.py | tot explain this)
+  tot free                     get a free model that runs on this computer (no limits, works offline)
+  tot usage                    how much you've used each model
   tot key <service> <key>      save an API key (${P.IDS.filter((i) => i !== 'ollama' && i !== 'custom').join(', ')})
   tot keys                     which keys are saved
   tot garden                   the models in your garden
@@ -128,11 +131,24 @@ async function main(argv) {
       out(`  Colours: ${rest[0]}`);
       return;
     }
-    case 'ask': return ask(rest, cfg);
+    case 'ask': case 'q': return ask(rest, cfg);
+    case 'free': case 'local': return free(cfg);
+    case 'usage': case 'stats': return usage();
+    case 'tidy': {
+      const { spawnSync } = require('child_process');
+      const r = spawnSync('tidy', rest, { stdio: 'inherit', shell: process.platform === 'win32' });
+      if (r.error) throw new Error('tidy isn\'t installed yet. Install it with pca, or: curl -fsSL https://raw.githubusercontent.com/dpatel7-dev/tidy/main/install.sh | sh');
+      return;
+    }
     case 'update': return update();
     case 'uninstall': return uninstall(rest.includes('--all'));
-    default:
-      throw new Error(`"${cmd}" isn't a tot command. Try: tot help`);
+    default: {
+      // a near-miss of a command ("tot updte") gets a hint; anything else is a question
+      const near = COMMANDS.find((c) => argv.length === 1 && cmd.length > 2 && !/\?$/.test(cmd) && close(cmd.toLowerCase(), c));
+      if (near) throw new Error(`Did you mean: tot ${near}?   (To ask it as a question: tot ask ${cmd})`);
+      if (cmd.startsWith('--')) throw new Error(`"${cmd}" isn't something tot knows. Try: tot help`);
+      return ask(argv, cfg);
+    }
   }
 }
 
@@ -149,29 +165,157 @@ async function plant(id, cfg) {
   }
 }
 
+const COMMANDS = ['dashboard', 'check', 'pull', 'help', 'key', 'keys', 'garden', 'models', 'theme', 'ask', 'free', 'usage', 'update', 'uninstall', 'tidy', 'version'];
+function close(a, b) { // at most two typos apart
+  if (Math.abs(a.length - b.length) > 2) return false;
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length] <= 2 && a !== b;
+}
+
+/**
+ * A quick question, answered right here. Then follow-ups until you press Enter
+ * on an empty line. It's saved as a chat, so it's in your garden later.
+ */
 async function ask(args, cfg) {
+  const S = require('./smart');
+  const Ans = require('./answer');
+  args = [...args];
   let model = cfg.garden[cfg.current || 0];
-  const m = args.indexOf('-m');
-  if (m >= 0) {
-    const want = (args[m + 1] || '').toLowerCase();
-    model = cfg.garden.find((g) => `${g.name} ${g.id}`.toLowerCase().includes(want));
-    if (!model) throw new Error(`No model in your garden matches "${args[m + 1]}". See: tot garden`);
-    args.splice(m, 2);
+  const files = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '-m' || args[i] === '--model') {
+      const want = (args[i + 1] || '').toLowerCase();
+      model = cfg.garden.find((g) => `${g.name} ${g.id}`.toLowerCase().includes(want));
+      if (!model) throw new Error(`No model in your garden matches "${args[i + 1]}". See: tot garden`);
+      args.splice(i, 2); i--;
+    } else if (args[i] === '-f' || args[i] === '--file') {
+      files.push(S.attach(args[i + 1] || ''));
+      args.splice(i, 2); i--;
+    }
   }
   let question = args.join(' ').trim();
-  if (!question && !process.stdin.isTTY) question = fs.readFileSync(0, 'utf8').trim();
-  if (!question) throw new Error('What should I ask? tot ask "your question"');
-  if (!model) throw new Error('Your garden is empty. Add a key first: tot key openrouter <your key>');
-  const ac = new AbortController();
-  process.on('SIGINT', () => ac.abort());
-  process.stdout.on('error', (e) => { if (e.code === 'EPIPE') { ac.abort(); process.exit(0); } });
-  process.stderr.write(Th.dim(`  ${model.name}\n\n`));
-  await P.chat({
-    provider: model.provider, key: St.keys.load()[model.provider], model: model.id, signal: ac.signal,
-    messages: [{ role: 'user', content: question }], system: cfg.system || undefined,
-    onText: (t) => process.stdout.write(t),
-  }).catch((e) => { if (e.name !== 'AbortError') throw e; });
-  process.stdout.write('\n');
+  if (!process.stdin.isTTY) {
+    const piped = fs.readFileSync(0, 'utf8');
+    if (question && piped.trim()) files.push({ name: 'input', text: piped.slice(0, 200 * 1024), bytes: piped.length });
+    else if (!question) question = piped.trim();
+  }
+  if (!question) throw new Error('What should I ask? tot what is osmosis?');
+  if (!model) {
+    const local = await P.ollamaHere();
+    if (local && local.length) model = { provider: 'ollama', id: local[0].id, name: local[0].name };
+  }
+  if (!model) throw new Error('Your garden is empty. For a free model on this computer: tot free   (or add a key: tot key openrouter <your key>)');
+  const keys = St.keys.load();
+  const chat = new St.Chat({ project: null });
+  const live = process.stdout.isTTY;
+  const interactive = live && process.stdin.isTTY;
+  let ac = null;
+  let stops = 0;
+  process.on('SIGINT', () => { if (ac && !ac.signal.aborted && stops++ === 0) { ac.abort(); return; } process.stdout.write('\n'); process.exit(130); });
+  process.stdout.on('error', (e) => { if (e.code === 'EPIPE') { if (ac) ac.abort(); process.exit(0); } });
+  const head = (m) => {
+    const plant = Pl.plantFor(m);
+    const maker = S.makerOf(m);
+    process.stderr.write('\n' + A.paint('✿ ', { fg: Pl.color(plant) }) + A.paint(m.name, { bold: true, fg: Pl.color(plant) }) + Th.dim(maker ? `  ${maker}` : '') + '\n\n');
+  };
+  let parent = null;
+  for (;;) {
+    const q = chat.add(parent, 'user', { text: question, ...(files.length ? { files: files.splice(0) } : {}) });
+    const messages = chat.path(q.id).filter((n) => n.text && !n.err).map((n) => ({ role: n.role, content: n.role === 'user' ? S.withFiles(n.text, n.files) : n.text }));
+    const node = chat.add(q.id, 'assistant', { model: `${model.provider}:${model.id}`, name: model.name, provider: model.provider });
+    chat.leaf = node.id;
+    ac = new AbortController();
+    stops = 0;
+    head(model);
+    const started = Date.now();
+    try {
+      const r = await Ans.answer({
+        model, garden: cfg.garden, keys, messages, system: cfg.system || undefined, signal: ac.signal, fallback: cfg.fallback !== false,
+        onText: (t) => { node.text += t; process.stdout.write(t); },
+        onSwitch: (next, why) => { process.stderr.write(Th.dim(`  ${why.model.name} ${why.why}: asking ${next.name} instead…\n`)); head(next); },
+      });
+      Object.assign(node, { model: `${r.model.provider}:${r.model.id}`, name: r.model.name, provider: r.model.provider, usage: r.usage || undefined, took: Date.now() - started });
+      model = r.model; // keep talking to whoever answered
+      if (r.trimmed) process.stderr.write(Th.dim(`\n  (a long chat: the ${r.trimmed} oldest messages were left out so it fits)`));
+    } catch (e) {
+      if (e.name === 'AbortError') { node.stopped = true; process.stdout.write(Th.dim('  (stopped)')); } else { node.err = e.message; process.stderr.write(Th.err(`\n  ${e.message}`) + (e.tried && e.tried.length ? Th.dim(`\n  Also tried: ${e.tried.map((t) => t.model.name).join(', ')}.`) : '')); }
+    }
+    process.stdout.write('\n');
+    St.chats.save(chat);
+    ac = null;
+    if (!interactive) return;
+    parent = node.id;
+    const next = await followUp();
+    if (!next) {
+      process.stderr.write(Th.dim(`  Saved in your garden as "${chat.title}" (open it with: tot)\n\n`));
+      return;
+    }
+    if (/^\/file\s+/.test(next)) {
+      try { files.push(S.attach(next.replace(/^\/file\s+/, ''))); process.stderr.write(Th.dim('  Attached. Now type your question.\n')); } catch (e) { process.stderr.write(Th.err(`  ${e.message}\n`)); }
+      const q2 = await followUp();
+      if (!q2) return;
+      question = q2;
+    } else question = next;
+  }
+}
+
+function followUp() {
+  return new Promise((resolve) => {
+    const rl = require('readline').createInterface({ input: process.stdin, output: process.stderr });
+    let done = false;
+    rl.on('close', () => { if (!done) { done = true; resolve(''); } });
+    rl.question('\n' + Th.dim('  follow up, or press Enter to finish') + '\n' + A.paint('↳ ', { fg: Th.t().leaf, bold: true }), (a) => { done = true; rl.close(); resolve(a.trim()); });
+  });
+}
+
+/** Free, unlimited, offline: download the model that best fits this computer and plant it. */
+async function free(cfg) {
+  const S = require('./smart');
+  const have = await P.ollamaModels();
+  const { memoryGB, picks } = S.localPicks();
+  if (!have) {
+    out(`
+  Free models with no limits run on your own computer, using Ollama (a free app).
+
+  ${Th.leaf('1.')} Download it:  https://ollama.com/download
+  ${Th.leaf('2.')} Open it once (on a Mac, a llama appears at the top of the screen).
+  ${Th.leaf('3.')} Run this again:  tot free
+`);
+    return;
+  }
+  out(`\n  This computer has about ${memoryGB} GB of memory. Best fits:\n`);
+  picks.forEach((p, i) => out(`  ${i === 0 ? Th.leaf('›') : ' '} ${p.name.padEnd(14)} ${Th.dim(`${p.about} · about ${p.gb} GB`)}`));
+  const got = new Set(have.map((m) => m.name));
+  for (const p of picks) {
+    if (!got.has(p.name)) {
+      out(`\n  Downloading ${p.name} (about ${p.gb} GB, only once)…`);
+      try {
+        let last = '';
+        await P.ollamaPull(p.name, { onProgress: (x) => { const l = x.total ? `${Math.round((100 * x.done) / x.total)}%` : x.status; if (l !== last && process.stdout.isTTY) process.stdout.write(`\r  ${l.padEnd(30)}`); last = l; } });
+      } catch (e) {
+        if (/does not exist|not found|404|manifest/i.test(e.message)) { out(Th.dim(`\r  ${p.name} isn't available any more; trying the next one.`)); continue; }
+        throw e;
+      }
+    }
+    if (!cfg.garden.some((g) => g.provider === 'ollama' && g.id === p.name)) cfg.garden.push({ provider: 'ollama', id: p.name, name: p.name });
+    cfg.current = cfg.garden.findIndex((g) => g.provider === 'ollama' && g.id === p.name);
+    St.config.save(cfg);
+    out(`\r  ${A.paint('✓', { fg: Th.t().ok })} ${p.name} is planted and picked. Try it: tot why is the sky blue?`.padEnd(60) + '\n');
+    return;
+  }
+  throw new Error('None of those could be downloaded. Pick one from ollama.com/library: tot pull <name>');
+}
+
+function usage() {
+  const S = require('./smart');
+  const rows = S.usage(St.chats.all());
+  if (!rows.length) { out('  Nothing used yet.'); return; }
+  const n = (x) => (x >= 1e6 ? (x / 1e6).toFixed(1) + 'M' : x >= 1e3 ? (x / 1e3).toFixed(1) + 'k' : String(x));
+  out(Th.dim('\n  ' + 'model'.padEnd(34) + 'answers'.padStart(8) + 'tokens in'.padStart(12) + 'out'.padStart(10) + 'cost'.padStart(10)));
+  for (const r of rows) out(`  ${r.name.slice(0, 33).padEnd(34)}${String(r.answers).padStart(8)}${n(r.in).padStart(12)}${n(r.out).padStart(10)}${(r.cost ? '$' + r.cost.toFixed(4) : '-').padStart(10)}`);
+  out(Th.dim('\n  A token is about three quarters of a word. Models on this computer are always free.\n'));
 }
 
 function installUrl(kind) {

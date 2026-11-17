@@ -234,3 +234,159 @@ test('network check tells blocked services apart', async () => {
   assert.equal(res.find((r) => r.id === 'groq').api, 'off');
   assert.equal(res.find((r) => r.id === 'openrouter').api, 'ok');
 });
+
+test('stand-ins: a busy model hands over to the next one, and you are told', async () => {
+  const S = require('../src/smart');
+  const Ans = require('../src/answer');
+  const garden = [
+    { provider: 'openrouter', id: 'anthropic/claude-test-opus', name: 'Claude Test Opus' },
+    { provider: 'openrouter', id: 'openai/gpt-test', name: 'GPT Test' },
+  ];
+  let text = '';
+  let switched = null;
+  const r = await Ans.answer({
+    model: garden[0], garden, keys: { openrouter: 'k' }, messages: [{ role: 'user', content: 'are you busy?' }],
+    onText: (t) => { text += t; }, onSwitch: (next, why) => { switched = { next, why }; },
+  });
+  assert.equal(r.model.id, 'openai/gpt-test');
+  assert.equal(switched.why.why, 'hit its limit');
+  assert.match(text, /gpt-test/);
+  assert.match(Ans.switchNote(r.tried, r.model), /Claude Test Opus hit its limit, so GPT Test answered instead/);
+  assert.ok(S.isResting(garden[0]), 'the busy one rests for a while');
+  // not for a wrong key: another model won't fix that
+  assert.equal(S.retryable(Object.assign(new Error('bad key'), { status: 401 })), false);
+  assert.equal(S.retryable(Object.assign(new Error('x'), { status: 503 })), true);
+  // and a model on this computer is tried first, since it has no limits
+  const order = S.fallbacks([...garden, { provider: 'ollama', id: 'llama-test:3b', name: 'local' }], garden[1]);
+  assert.equal(order[0].provider, 'ollama');
+});
+
+test('long chats are trimmed to fit, keeping the start and the newest messages', () => {
+  const S = require('../src/smart');
+  const msgs = [];
+  for (let i = 0; i < 40; i++) msgs.push({ role: i % 2 ? 'assistant' : 'user', content: `message ${i} ` + 'x'.repeat(500) });
+  const { messages, trimmed } = S.fitMessages(msgs, 6000);
+  assert.ok(trimmed > 20);
+  assert.equal(messages[0].content, msgs[0].content, 'the first question stays');
+  assert.match(messages[1].content, /left out/);
+  assert.equal(messages[2].role, 'user', 'after the note, the person speaks');
+  assert.equal(messages[messages.length - 1].content, msgs[39].content, 'the newest stays');
+  assert.equal(S.fitMessages(msgs.slice(0, 3), 1e6).trimmed, 0);
+  assert.equal(S.makerOf({ id: 'anthropic/claude-x' }), 'Anthropic');
+  assert.equal(S.makerOf({ id: 'gemma3:4b', provider: 'ollama' }), 'Google');
+  assert.equal(S.makerOf({ id: 'gpt-oss:20b' }), 'OpenAI');
+  assert.equal(S.localPicks(8 * 1024 ** 3).picks[0].name, 'gemma3:4b');
+  assert.equal(S.localPicks(16 * 1024 ** 3).picks[0].name, 'qwen3:8b');
+});
+
+test('quick questions from the command line, with a file piped in, saved as a chat', async () => {
+  // (the pretend service lives in this process, so the child must be run without blocking it)
+  const run = (args, input) => new Promise((resolve) => {
+    const c = require('child_process').spawn(process.execPath, [path.join(__dirname, '..', 'bin', 'tot.js'), ...args], { env: process.env });
+    let stdout = '';
+    let stderr = '';
+    c.stdout.on('data', (d) => { stdout += d; });
+    c.stderr.on('data', (d) => { stderr += d; });
+    c.on('close', (status) => resolve({ status, stdout, stderr }));
+    c.stdin.end(input);
+  });
+  const cfg = St.config.load();
+  cfg.garden = [{ provider: 'openrouter', id: 'openai/gpt-test', name: 'GPT Test' }];
+  cfg.current = 0;
+  St.config.save(cfg);
+  St.keys.set('openrouter', 'k');
+  const before = St.chats.list().length;
+  const r = await run(['what', 'is', 'osmosis?'], 'some notes about cells');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /gpt-test/);
+  assert.match(r.stderr, /GPT Test/);
+  assert.equal(St.chats.list().length, before + 1, 'it is in your garden');
+  const sent = svc.seen[svc.seen.length - 1].body.messages.pop().content;
+  assert.match(sent, /what is osmosis\?/);
+  assert.match(sent, /some notes about cells/, 'the piped text went along');
+  const typo = await run(['updte'], '');
+  assert.match(typo.stderr, /Did you mean: tot update/);
+});
+
+test('projects: their instructions and pinned files reach the model; attachments go with a question', async () => {
+  const input = new PassThrough();
+  input.setRawMode = () => {};
+  const output = new Writable({ write(c, e, cb) { cb(); } });
+  output.columns = 100;
+  output.rows = 30;
+  const pinned = path.join(home, 'brief.md');
+  fs.writeFileSync(pinned, 'The science fair is on March 3rd.');
+  const extra = path.join(home, 'data.csv');
+  fs.writeFileSync(extra, 'day,height\n1,2\n2,4');
+  const { App } = require('../src/app');
+  const app = new App({ input, output });
+  const done = app.run();
+  await sleep(30);
+  input.write('/project Science fair\r');
+  await sleep(20);
+  const pr = app.project(app.cfg.project);
+  assert.equal(pr.name, 'Science fair');
+  pr.instructions = 'Answer like a friendly coach.';
+  input.write(`/pin ${pinned}\r`);
+  await sleep(20);
+  assert.deepEqual(pr.files, [pinned]);
+  input.write(`/file ${extra}\r`);
+  await sleep(20);
+  assert.equal(app.files.length, 1);
+  input.write('how is my plant doing?\r');
+  await until(() => app.chat.path().length === 2 && !app.jobs.size, 'the answer');
+  const body = svc.seen[svc.seen.length - 1].body;
+  const sys = body.messages[0];
+  assert.equal(sys.role, 'system');
+  assert.match(sys.content, /Science fair/);
+  assert.match(sys.content, /friendly coach/);
+  assert.match(sys.content, /March 3rd/);
+  assert.match(body.messages[body.messages.length - 1].content, /day,height/);
+  assert.equal(app.chat.project, pr.id, 'the chat belongs to the project');
+  assert.equal(app.files.length, 0, 'attachments go with one question');
+  // save the answer to a file
+  const cwd = process.cwd();
+  process.chdir(home);
+  try { input.write('/save code snippet.js\r'); await sleep(30); } finally { process.chdir(cwd); }
+  assert.match(fs.readFileSync(path.join(home, 'snippet.js'), 'utf8'), /console\.log/);
+  // search finds it
+  assert.equal(St.chats.search('plant doing')[0].id, app.chat.id);
+  input.write('/project\r');
+  await sleep(20);
+  input.write('\x1b');
+  await sleep(60);
+  input.write('\x04');
+  await done;
+});
+
+test('the dashboard: quick questions stream back and are saved; projects; usage', async () => {
+  const cfg = St.config.load();
+  cfg.garden = [{ provider: 'openrouter', id: 'anthropic/claude-test-opus', name: 'Claude Test Opus' }, { provider: 'openrouter', id: 'openai/gpt-test', name: 'GPT Test' }];
+  cfg.current = 0;
+  cfg.project = null;
+  St.config.save(cfg);
+  const d = await require('../src/dashboard').serve({ openBrowser: false });
+  try {
+    const base = d.url.replace(/\/$/, '');
+    const r = await fetch(base + '/api/ask', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ question: 'is everyone busy?' }) });
+    const evs = (await r.text()).trim().split('\n').map((l) => JSON.parse(l));
+    assert.equal(evs[0].type, 'model');
+    assert.ok(evs.some((e) => e.type === 'switch' && e.name === 'GPT Test'), 'a stand-in answered');
+    const done = evs.find((e) => e.type === 'done');
+    assert.match(done.note, /hit its limit/);
+    assert.match(St.chats.load(done.chat).path()[1].text, /gpt-test/);
+    const post = (p, body) => fetch(base + '/api/' + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((x) => x.json());
+    let s = await post('projects', { action: 'add', name: 'Robotics' });
+    const pr = s.projects.find((p) => p.name === 'Robotics');
+    s = await post('projects', { action: 'save', id: pr.id, instructions: 'Use metric units.' });
+    assert.equal(s.projects.find((p) => p.id === pr.id).instructions, 'Use metric units.');
+    const bad = await post('projects', { action: 'pin', id: pr.id, file: '/no/such/file' });
+    assert.match(bad.error, /no file/);
+    s = await post('projects', { action: 'use', id: pr.id });
+    assert.equal(s.project, pr.id);
+    const u = await (await fetch(base + '/api/usage')).json();
+    assert.ok(u.some((row) => row.name === 'GPT Test' && row.answers >= 1));
+    assert.ok((await (await fetch(base + '/api/search?q=everyone%20busy')).json()).length >= 1);
+    assert.ok(s.computer.picks.length >= 3 && s.garden[0].maker === 'Anthropic');
+  } finally { d.close(); }
+});
