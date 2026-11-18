@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.2.0
+- A roomier garden sidebar: each model is one clean line with a small plant icon (no more big pictures crowding the text), its maker on a quieter line under it, and the one you're using marked with a bar in its colour. Chats have room, and nothing gets cut off.
+- Clean pictures in macOS Terminal: Rowan is drawn with whole cells there (no thin stripes), smaller and tidier. The welcome screen never shows half a tree on a small window. `TUI_PIXELS=smooth` brings back the detailed one.
+- The welcome card is simpler: the model's icon, name and what it costs, without the big plant picture.
+
 ## 2.1.0
 - Free AI in the cloud, as easy as copy and paste: `tot free` (or Tab → Set up free AI, or the dashboard) opens each service's key page and notices the key when you copy it. Groq, NVIDIA, Google Gemini, Mistral, OpenRouter, Ollama Cloud and SambaNova, with their best free models (DeepSeek, Kimi K2, GPT-OSS 120B, Qwen3, Gemini, Mistral Large…).
 - Auto (free): picks the best free model with room left for every question (fast ones for quick questions, coding ones for code) and moves on when one runs out.

@@ -68,12 +68,40 @@ const SCENES = {
   wilt: [f(wilt(BASE), 1200), f(wilt(sway(BASE, -1)), 900), f(wilt(BASE), 1200)],
 };
 
-const WIDTH = 20; // columns
-const HEIGHT = 8; // lines
+// The small Rowan, made of whole cells for macOS Terminal (see sprite.js).
+const MINI = [
+  '...LLLLL....',
+  '.LLHHLLLLL..',
+  'LLHLLLLLLLl.',
+  'LLLLLLLLLll.',
+  '.lLLLLLLll..',
+  '...lTTTl....',
+  '....TTT.....',
+  '...TETET....',
+  '...TTmTT....',
+  '.GGTTTTTGG..',
+];
+const M_CANOPY = 5;
+const mSway = (g, dx) => S.shift(g, dx, M_CANOPY);
+const mBubbles = (g, n) => S.dots(g, [[11, 4, 'b'], [11, 2, n > 0 ? 'b' : '.'], [10, 0, n > 1 ? 'b' : '.']]);
+const mLeaf = (g, y) => S.dots(g, [[10 + (y % 2), y, 'f']]);
+const M_BLOSSOMS = [[3, 1], [7, 1], [2, 3], [6, 2], [8, 3], [4, 4]];
+const mBloom = (g, n) => S.dots(g, M_BLOSSOMS.slice(0, n).map(([x, y], i) => [x, y, i % 3 === 2 ? 'p' : 'P']));
+const mWilt = (g) => g.map((r, y) => (y < M_CANOPY ? r.replace(/H/g, 'l').replace(/L/g, (m, i) => ((i + y) % 2 ? 'l' : m)) : r)).map((r) => r.replace('TETET', 'TmTmT'));
+const MINI_SCENES = {
+  idle: [f(MINI, 1400), f(mSway(MINI, 1), 900), f(MINI, 1400), f(blink(MINI), 160), f(MINI, 1200)],
+  think: [f(mBubbles(MINI, 0), 320), f(mBubbles(MINI, 1), 320), f(mBubbles(mSway(MINI, 1), 2), 320), f(mBubbles(MINI, 2), 320), f(blink(mBubbles(MINI, 1)), 160)],
+  write: [0, 2, 4, 6, 8].map((y, i) => f(mLeaf(i % 2 ? mSway(MINI, 1) : MINI, y), 200)),
+  bloom: [1, 2, 3, 4, 5, 6].map((n) => f(mBloom(MINI, n), 150)).concat([f(mBloom(MINI, 6), 1600)]),
+  wilt: [f(mWilt(MINI), 1200), f(mWilt(mSway(MINI, -1)), 900)],
+};
+
+const blocky = () => S.style() === 'blocky';
 
 /** The lines for a scene at a moment in time (looping). */
 function frameAt(scene, ms) {
-  const frames = SCENES[scene] || SCENES.idle;
+  const set = blocky() ? MINI_SCENES : SCENES;
+  const frames = set[scene] || set.idle;
   const total = frames.reduce((n, x) => n + x.ms, 0);
   let at = ms % total;
   for (const fr of frames) {
@@ -84,10 +112,14 @@ function frameAt(scene, ms) {
 }
 
 /** How long a scene takes once through. */
-const length = (scene) => (SCENES[scene] || SCENES.idle).reduce((n, x) => n + x.ms, 0);
+const length = (scene) => ((blocky() ? MINI_SCENES : SCENES)[scene] || SCENES.idle).reduce((n, x) => n + x.ms, 0);
 
 function draw(scene = 'idle', ms = 0, bg = Th.t().paper.bg) {
-  return S.draw(frameAt(scene, ms), ink(), { bg });
+  return blocky() ? S.drawBlocky(frameAt(scene, ms), ink(), { bg }) : S.draw(frameAt(scene, ms), ink(), { bg });
 }
 
-module.exports = { draw, length, SCENES, WIDTH, HEIGHT, BASE, ink, shade };
+module.exports = {
+  draw, length, SCENES, MINI, BASE, ink, shade,
+  get WIDTH() { return blocky() ? MINI[0].length * 2 : BASE[0].length; }, // columns
+  get HEIGHT() { return blocky() ? MINI.length : Math.ceil(BASE.length / 2); }, // lines
+};

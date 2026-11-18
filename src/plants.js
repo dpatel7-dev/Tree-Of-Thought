@@ -128,4 +128,7 @@ function big(name, bg) {
 /** The plant's main colour, for names and markers. */
 const color = (name) => Object.values((P[name] || P.sprout).ink)[0];
 
-module.exports = { PLANTS: P, plantFor, small, big, color };
+/** A one-character icon for lists: a clover for Auto, a seed for models on this computer, a flower for the rest. */
+const glyph = (name) => (name === 'clover' ? '♣' : name === 'acorn' ? '◆' : name === 'sprout' ? '❧' : '✿');
+
+module.exports = { PLANTS: P, plantFor, small, big, color, glyph };

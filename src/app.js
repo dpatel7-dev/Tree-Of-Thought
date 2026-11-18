@@ -8,7 +8,7 @@
 //   │ + Plant a model          │  ✿ Some Model        ‹ 1 of 3 ›         │
 //   │ CHATS                    │  How about "Pixel"?                     │
 //   │ › cat names        2m    ├─────────────────────────────────────────┤
-//   │ + New chat         [🌳]  │ › Ask Some Model…                       │
+//   │ + New chat      [Rowan]  │ › Ask Some Model…                       │
 //   ╰──────────────────────────┴─────────────────────────────────────────╯
 
 const fs = require('fs');
@@ -1082,7 +1082,7 @@ class App {
     const m = this.model();
     const plant = m ? Pl.plantFor(m) : 'sprout';
     const pr = this.project(this.chat.project);
-    const title = (m ? A.paint('✿ ', { fg: Pl.color(plant) }) + A.paint(m.name, { bold: true }) + Th.dim(' · ' + whoText(m)) : Th.dim('no model yet')) + (pr ? Th.blossom('  ▸ ' + pr.name) : '');
+    const title = (m ? A.paint(Pl.glyph(plant) + ' ', { fg: Pl.color(plant) }) + A.paint(m.name, { bold: true }) + Th.dim(' · ' + whoText(m)) : Th.dim('no model yet')) + (pr ? Th.blossom('  ▸ ' + pr.name) : '');
     const left = side ? B('╭─ ') + Th.leaf('tree of thought', { bold: true }) + ' ' : '';
     const tt = A.clip(title, paneW - 5);
     const top = side
@@ -1154,50 +1154,62 @@ class App {
     const rowAt = new Map();
     const mark = (row) => rowAt.set(out.length, row);
     const isCur = (row) => this.sameRow(row, this.cursor);
-    const sel = (s, on) => (on && s[0] === ' ' ? Th.leaf('›') + s.slice(1) : s);
 
-    out.push(' ' + Th.leaf('GARDEN', { bold: true }) + Th.faint(this.garden.length ? `  ${this.garden.length}` : ''));
+    // ── the garden: one or two lines per model, a small plant icon each ──
+    const gap = (l, r) => spread(l, r, w - 2);
+    out.push(' ' + gap(Th.leaf('Garden', { bold: true }), Th.faint(this.garden.length ? String(this.garden.length) : '')));
     if (this.garden.some(F.isAuto)) {
       if (!this.meterAt || Date.now() - this.meterAt > 15000) { this.meterAt = Date.now(); try { this.meterLine = Me.line(Me.summary(this.garden, this.keys)); } catch { this.meterLine = ''; } }
-      if (this.meterLine) out.push(' ' + Th.faint(A.clip(this.meterLine, w - 2)));
+      if (this.meterLine) out.push(' ' + Th.faint(A.clip(this.meterLine.replace(/^today: /, 'today '), w - 2)));
     }
+    out.push('');
     if (!this.garden.length) {
-      out.push(Th.dim('  nothing planted yet'));
-      out.push(Th.dim('  tab → API keys'));
+      out.push(Th.dim('  Nothing planted yet.'));
+      out.push(Th.dim('  Press Enter to set up'));
+      out.push(Th.dim('  free AI in a minute.'));
+      out.push('');
     }
     this.garden.forEach((m, i) => {
       const row = { kind: 'model', i };
       const plant = Pl.plantFor(m);
-      const emb = Pl.small(plant, bg);
       const chosen = i === (this.cfg.current || 0);
-      const bar = chosen ? A.paint('▌', { fg: t.leaf }) : ' ';
-      const name = A.paint(A.clip(m.name, w - 9), chosen ? { bold: true, fg: Pl.color(plant) } : { fg: t.paper.fg });
+      const here = isCur(row);
+      const col = Pl.color(plant);
+      const edge = chosen ? A.paint('▌', { fg: col }) : here ? Th.leaf('›') : ' ';
       const busy = [...this.jobs.values()].some((j) => keyOf(j.model) === keyOf(m));
-      const l1 = bar + emb[0] + ' ' + name + (busy ? ' ' + Th.sun('•') : '');
-      const l2 = bar + emb[1] + ' ' + Th.dim(A.clip(whoText(m), w - 9));
-      const pt = m.provider === 'ollama' ? 'free · no limits' : priceText(m);
-      const l3 = bar + emb[2] + ' ' + Th.faint(A.clip(P.PROVIDERS[m.provider] && pt === P.PROVIDERS[m.provider].name ? '' : pt, w - 9));
-      for (const l of [l1, l2, l3]) { mark(row); out.push(l); }
+      const name = A.paint(A.clip(m.name, w - 7), chosen ? { bold: true, fg: col } : { fg: here ? t.leaf : t.paper.fg });
+      const free = m.provider === 'ollama' || m.free || /:free$/.test(m.id) || F.isAuto(m);
+      const who = F.isAuto(m) ? 'picks a free model' : whoText(m).replace(' · via ', ' · ').replace(' · on this computer', ' · this computer');
+      mark(row);
+      out.push(edge + ' ' + A.paint(Pl.glyph(plant), { fg: col }) + ' ' + name + (busy ? ' ' + Th.sun('•') : ''));
+      mark(row);
+      out.push((chosen ? A.paint('▌', { fg: col }) : ' ') + '   ' + Th.faint(A.clip(who + (free && !F.isAuto(m) && m.provider !== 'ollama' ? ' · free' : ''), w - 6)));
     });
-    { const row = { kind: 'add' }; mark(row); out.push(sel(' ' + Th.leaf('+') + ' ' + Th.dim('Plant a model'), isCur(row))); }
+    { const row = { kind: 'add' }; mark(row); out.push((isCur(row) ? Th.leaf('›') : ' ') + ' ' + Th.leaf('+') + ' ' + Th.dim('Plant a model')); }
     out.push('');
+    out.push('');
+    // ── chats ──
     const pr = this.project(this.cfg.project);
-    out.push(' ' + Th.blossom(pr ? A.clip(pr.name.toUpperCase(), w - 4) : 'CHATS', { bold: true }) + (pr ? Th.faint(' project') : ''));
+    out.push(' ' + gap(Th.blossom(pr ? A.clip(pr.name, w - 12) : 'Chats', { bold: true }), Th.faint(pr ? 'project' : '')));
+    out.push('');
     for (const c of this.visibleChats().slice(0, 30)) {
       const row = { kind: 'chat', id: c.id };
       const open = c.id === this.chat.id;
+      const here = isCur(row);
       const when = Th.faint(require('./tui').ago(c.updated).replace(' ago', ''));
       mark(row);
-      out.push(sel((open ? Th.blossom('›') : ' ') + ' ' + spread(A.paint(A.clip(c.title, w - 10), open ? { bold: true } : {}), when, w - 3), isCur(row)));
+      out.push((open ? Th.blossom('▌') : here ? Th.blossom('›') : ' ') + ' ' + spread(A.paint(A.clip(c.title, w - 10), open ? { bold: true } : here ? { fg: t.blossom } : {}), when, w - 3));
     }
-    { const row = { kind: 'new' }; mark(row); out.push(sel(' ' + Th.blossom('+') + ' ' + Th.dim('New chat'), isCur(row))); }
+    { const row = { kind: 'new' }; mark(row); out.push((isCur(row) ? Th.blossom('›') : ' ') + ' ' + Th.blossom('+') + ' ' + Th.dim('New chat')); }
 
     // keep the highlighted row on screen, and Rowan at the bottom when there's room
+    // Rowan sits at the bottom only when everything above still fits
     const room = h - (R.HEIGHT + 1);
+    const tree = !this.chat.empty && room >= 10 && out.length <= room;
     let lines = out;
     let first = 0;
-    if (out.length > (room >= 10 ? room : h)) {
-      const want = room >= 10 ? room : h;
+    if (out.length > (tree ? room : h)) {
+      const want = tree ? room : h;
       const cur = [...rowAt.entries()].filter(([, r]) => isCur(r)).map(([y]) => y);
       const c = cur.length ? cur[cur.length - 1] : 0;
       first = Math.max(0, Math.min(out.length - want, c - Math.floor(want / 2)));
@@ -1207,11 +1219,10 @@ class App {
     }
     this.hit = new Map();
     for (const [y, r] of rowAt) if (y >= first && y < first + lines.length) this.hit.set(1 + y - first, r);
-    if (room >= 10 && !this.chat.empty) {
+    if (tree) {
       while (lines.length < room) lines.push('');
       lines.push('');
-      const tree = this.rowan(bg);
-      for (const l of tree) lines.push(' '.repeat(Math.max(0, Math.floor((w - R.WIDTH) / 2))) + l);
+      for (const l of this.rowan(bg)) lines.push(' '.repeat(Math.max(0, Math.floor((w - R.WIDTH) / 2))) + l);
     }
     return lines;
   }
@@ -1241,7 +1252,7 @@ class App {
       }
       const plant = Pl.plantFor({ id: String(n.model || '').split(':').slice(1).join(':'), provider: n.provider, name: n.name });
       const took = n.took ? Th.faint(`  ${(n.took / 1000).toFixed(n.took < 10000 ? 1 : 0)}s`) : '';
-      all.push(' ' + A.paint('✿ ', { fg: Pl.color(plant) }) + A.paint(this.nameOf(n.model, n), { bold: true, fg: Pl.color(plant) }) + took + pos);
+      all.push(' ' + A.paint(Pl.glyph(plant) + ' ', { fg: Pl.color(plant) }) + A.paint(this.nameOf(n.model, n), { bold: true, fg: Pl.color(plant) }) + took + pos);
       if (n.note) for (const l of Md.plain(n.note, inner)) all.push('  ' + Th.faint(l));
       if (n.trimmed) all.push('  ' + Th.faint(`(this chat is long: the ${n.trimmed} oldest messages after your first were left out so it fits)`));
       if (n.thought && (this.cfg.thoughts || (n.live && !n.text))) {
@@ -1296,28 +1307,21 @@ class App {
     const out = [];
     const m = this.model();
     const tree = R.draw(this.mood.scene === 'idle' ? 'idle' : this.mood.scene, Date.now() - this.mood.at, bg);
-    const head = [
-      '', ...tree.map((l) => center(l, w - 1)), '',
-      center(Th.leaf('Tree of Thought', { bold: true }), w - 1),
-      center(Th.dim('many minds, one garden. every answer is a branch.'), w - 1), '',
-    ];
+    const title = [center(Th.leaf('Tree of Thought', { bold: true }), w - 1), center(Th.dim('many minds, one garden. every answer is a branch.'), w - 1)];
     const body = [];
     if (m) {
       const plant = Pl.plantFor(m);
-      const big = Pl.big(plant, bg);
       const info = [
-        A.paint(m.name, { bold: true, fg: Pl.color(plant) }),
-        Th.dim(P.PROVIDERS[m.provider].name + ' · ' + Pl.PLANTS[plant].about),
-        Th.faint(A.clip(m.id, Math.max(10, w - 22))),
-        Th.faint(priceText(m)), '',
-        Th.dim(`${this.garden.length} model${this.garden.length === 1 ? '' : 's'} in your garden`),
+        A.paint(Pl.glyph(plant), { fg: Pl.color(plant) }) + ' ' + A.paint(m.name, { bold: true, fg: Pl.color(plant) }),
+        '  ' + Th.dim(F.isAuto(m) ? 'picks a free model for each question' : whoText(m)),
+        '  ' + Th.faint(priceText(m) + ` · ${this.garden.length} model${this.garden.length === 1 ? '' : 's'} in your garden`),
       ];
-      const cardW = Math.min(w - 4, 12 + 2 + Math.max(...info.map((x) => A.vwidth(x))));
-      const pad = ' '.repeat(Math.max(0, Math.floor((w - 1 - cardW) / 2)));
-      for (let i = 0; i < 6; i++) body.push(pad + big[i] + '  ' + (info[i] || ''));
+      const cw = Math.min(w - 4, Math.max(...info.map((x) => A.vwidth(x))));
+      const pad = ' '.repeat(Math.max(0, Math.floor((w - 1 - cw) / 2)));
+      for (const l of info) body.push(pad + A.clip(l, w - 3));
       body.push('');
       const tips = [['Enter', 'ask'], ['Ctrl+G', 'ask every model at once'], ['← →', 'flip between their answers'], ['/file', 'attach a file (or drag one in)'], ['Tab', 'menu: projects, free models, keys']];
-      for (const [k, d] of tips) body.push(center(Th.leaf(k.padEnd(7)) + ' ' + Th.dim(d.padEnd(36)), w - 1));
+      for (const [k, d] of tips) body.push(center(Th.leaf(k.padEnd(7)) + ' ' + Th.dim(d.padEnd(32)), w - 1));
       body.push('');
       body.push(center(Th.faint('quick question from any terminal: ') + Th.dim('tot what is osmosis?'), w - 1));
     } else {
@@ -1334,8 +1338,10 @@ class App {
       const pad = ' '.repeat(Math.max(0, Math.floor((w - 1 - cw) / 2)));
       for (const l of lines) body.push(pad + l);
     }
-    let all = head.concat(body);
-    if (all.length > h) all = head.slice(Math.min(head.length, all.length - h)).concat(body).slice(-h);
+    // Rowan only when the whole tree fits: never half of one
+    const withTree = ['', ...tree.map((l) => center(l, w - 1)), '', ...title, '', ...body];
+    const noTree = ['', ...title, '', ...body];
+    let all = withTree.length <= h ? withTree : noTree.length <= h ? noTree : body.slice(0, h);
     const top = Math.max(0, Math.floor((h - all.length) / 2));
     for (let i = 0; i < top; i++) out.push('');
     return out.concat(all).slice(0, h);
@@ -1367,7 +1373,7 @@ class App {
     items.slice(first, first + room).forEach((it, j) => {
       const i = first + j;
       const on = i === this.menu.index;
-      const dot = it.plant ? A.paint('✿ ', { fg: Pl.color(it.plant) }) : '';
+      const dot = it.plant ? A.paint(Pl.glyph(it.plant) + ' ', { fg: Pl.color(it.plant) }) : '';
       const label = (on ? Th.leaf('› ', { bold: true }) : '  ') + dot + A.paint(it.label, on ? { bold: true } : {}) + (it.hint ? Th.faint('  ' + it.hint) : '');
       const line = spread(label, Th.dim(A.clip(it.desc || '', Math.max(0, w - A.vwidth(label) - 6))), w - 3);
       out.push(' ' + line);

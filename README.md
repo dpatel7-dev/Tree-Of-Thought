@@ -1,4 +1,4 @@
-# 🌳 Tree of Thought
+# Tree of Thought
 
 **Many AI models in one terminal garden. Every answer is a branch.**
 

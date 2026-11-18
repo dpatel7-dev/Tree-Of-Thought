@@ -111,7 +111,7 @@ async function main(argv) {
       if (!cfg.garden.length) { out('  Your garden is empty. Add a key: tot key openrouter <your key>'); return; }
       cfg.garden.forEach((m, i) => {
         const plant = Pl.plantFor(m);
-        out(`  ${i === cfg.current ? Th.leaf('›') : ' '} ${A.paint('✿', { fg: Pl.color(plant) })} ${m.name.padEnd(36)} ${Th.dim(P.PROVIDERS[m.provider].name)}`);
+        out(`  ${i === cfg.current ? Th.leaf('›') : ' '} ${A.paint(Pl.glyph(plant), { fg: Pl.color(plant) })} ${m.name.padEnd(36)} ${Th.dim(P.PROVIDERS[m.provider].name)}`);
       });
       return;
     }
@@ -124,7 +124,7 @@ async function main(argv) {
         let list;
         try { list = await P.listModels(id, keys[id]); } catch (e) { if (id !== 'ollama') out(`  ${Th.err('✗')} ${e.message}`); continue; }
         for (const m of list.filter((x) => x.text && (!want || `${x.name} ${x.id}`.toLowerCase().includes(want)))) {
-          out(`  ${A.paint('✿', { fg: Pl.color(Pl.plantFor(m)) })} ${m.name.slice(0, 40).padEnd(41)} ${Th.dim(`${id}  ${m.id}`)}`);
+          out(`  ${A.paint(Pl.glyph(Pl.plantFor(m)), { fg: Pl.color(Pl.plantFor(m)) })} ${m.name.slice(0, 40).padEnd(41)} ${Th.dim(`${id}  ${m.id}`)}`);
           n++;
         }
       }
@@ -179,7 +179,7 @@ async function plant(id, cfg) {
     const pick = id === 'openrouter' ? P.pickGarden(all) : all.filter((m) => m.text).sort((a, b) => (b.created || 0) - (a.created || 0)).slice(0, 5);
     for (const m of pick) cfg.garden.push({ provider: id, id: m.id, name: m.name, price: m.price, free: m.free });
     St.config.save(cfg);
-    for (const m of pick) out(`    ${A.paint('✿', { fg: Pl.color(Pl.plantFor(m)) })} ${m.name}`);
+    for (const m of pick) out(`    ${A.paint(Pl.glyph(Pl.plantFor(m)), { fg: Pl.color(Pl.plantFor(m)) })} ${m.name}`);
   } catch (e) {
     out(`  ${e.message}`);
   }
@@ -238,7 +238,7 @@ async function ask(args, cfg) {
   const head = (m) => {
     const plant = Pl.plantFor(m);
     const maker = S.makerOf(m);
-    process.stderr.write('\n' + A.paint('✿ ', { fg: Pl.color(plant) }) + A.paint(m.name, { bold: true, fg: Pl.color(plant) }) + Th.dim(maker ? `  ${maker}` : '') + '\n\n');
+    process.stderr.write('\n' + A.paint(Pl.glyph(plant) + ' ', { fg: Pl.color(plant) }) + A.paint(m.name, { bold: true, fg: Pl.color(plant) }) + Th.dim(maker ? `  ${maker}` : '') + '\n\n');
   };
   let parent = null;
   for (;;) {
