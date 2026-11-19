@@ -29,6 +29,32 @@ const { Tui, fit, center, spread, copy, open, size, bar } = require('./tui');
 const pkg = require('../package.json');
 
 const keyOf = (m) => `${m.provider}:${m.id}`;
+
+/** k of colour a, the rest b (#rrggbb). */
+function mixHex(a, b, k) {
+  const p = (h) => [1, 3, 5].map((i) => parseInt(String(h).slice(i, i + 2), 16));
+  const [x, y] = [p(a), p(b)];
+  if (x.some(Number.isNaN) || y.some(Number.isNaN)) return b;
+  return '#' + x.map((v, i) => Math.round(v * k + y[i] * (1 - k)).toString(16).padStart(2, '0')).join('');
+}
+
+/** A line painted on a background colour all the way to `width` (colours inside it keep working). */
+function onBg(s, bg, width) {
+  const o = A.sgr({ bg });
+  if (!o) return fit(s, width);
+  const c = A.clip(String(s), width);
+  return o + c.replace(/\x1b\[0?m/g, (m) => m + o) + ' '.repeat(Math.max(0, width - A.vwidth(c))) + A.RESET;
+}
+
+/** "now", "5m", "3h", "2d", "Nov 3". */
+function short(ms) {
+  const s = (Date.now() - (ms || 0)) / 1000;
+  if (s < 60) return 'now';
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)}d`;
+  return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 const money = (v) => (v === null || v === undefined || Number.isNaN(v) ? null : v === 0 ? '0' : v < 0.1 ? v.toFixed(3).replace(/0+$/, '') : v < 10 ? v.toFixed(2).replace(/\.?0+$/, '') : v.toFixed(0));
 
 /** "Anthropic · via OpenRouter", or just "OpenRouter" when it's the maker's own service. */
@@ -1038,10 +1064,9 @@ class App {
   }
 
   rows() {
-    const out = this.garden.map((m, i) => ({ kind: 'model', i }));
+    const out = [{ kind: 'new' }, ...this.garden.map((m, i) => ({ kind: 'model', i }))];
     out.push({ kind: 'add' });
     for (const c of this.visibleChats().slice(0, 30)) out.push({ kind: 'chat', id: c.id });
-    out.push({ kind: 'new' });
     return out;
   }
 
@@ -1071,9 +1096,10 @@ class App {
     const t = Th.t();
     const B = (s) => A.paint(s, { fg: t.border });
     const side = W >= 72 && this.cfg.sidebar !== false;
-    const sideW = side ? Math.max(26, Math.min(34, Math.floor(W * 0.3))) : 0;
+    const sideW = side ? Math.max(26, Math.min(34, Math.floor(W * 0.28))) : 0;
     this.sideW = sideW;
-    const paneW = side ? W - sideW - 4 : W - 2;
+    // with the sidebar: [sidebar][space][│ chat │]
+    const paneW = side ? W - sideW - 3 : W - 2;
     const editor = this.menu ? null : this.ed.layout(paneW - 4, Math.min(6, Math.max(1, Math.floor(H / 5))));
     const inputH = editor ? editor.lines.length : 1;
     const bodyH = H - 4 - inputH;
@@ -1083,32 +1109,31 @@ class App {
     const plant = m ? Pl.plantFor(m) : 'sprout';
     const pr = this.project(this.chat.project);
     const title = (m ? A.paint(Pl.glyph(plant) + ' ', { fg: Pl.color(plant) }) + A.paint(m.name, { bold: true }) + Th.dim(' · ' + whoText(m)) : Th.dim('no model yet')) + (pr ? Th.blossom('  ▸ ' + pr.name) : '');
-    const left = side ? B('╭─ ') + Th.leaf('tree of thought', { bold: true }) + ' ' : '';
-    const tt = A.clip(title, paneW - 5);
-    const top = side
-      ? left + B('─'.repeat(Math.max(0, sideW + 2 - A.vwidth(left)))) + B('┬─ ') + tt + ' ' + B('─'.repeat(Math.max(0, paneW - 3 - A.vwidth(tt)))) + B('╮')
-      : B('╭─ ') + A.clip(title, W - 6) + ' ' + B('─'.repeat(Math.max(0, W - 5 - A.vwidth(A.clip(title, W - 6))))) + B('╮');
+    const boxW = side ? paneW + 2 : W;
+    const tt = A.clip(title, boxW - 6);
+    const top = B('╭─ ') + tt + ' ' + B('─'.repeat(Math.max(0, boxW - 5 - A.vwidth(tt)))) + B('╮');
 
-    const sideLines = side ? this.sideLines(sideW, bodyH + 1 + inputH) : [];
+    const rowsH = H - 1; // everything but the hint line
+    const sideLines = side ? this.sideLines(sideW, rowsH) : [];
     const paneLines = this.menu ? this.menuLines(paneW, bodyH + 1 + inputH) : this.paneLines(paneW, bodyH);
 
-    const lines = [fit(top, W)];
+    const box = [top];
     for (let y = 0; y < bodyH + 1 + inputH; y++) {
       let pane;
       if (this.menu) pane = paneLines[y] || '';
       else if (y < bodyH) pane = paneLines[y] || '';
       else if (y === bodyH) pane = null; // the line above the typing box
       else pane = this.inputLine(editor, y - bodyH - 1, paneW);
-      const l = side ? B('│') + fit(sideLines[y] || '', sideW) + ' ' : '';
-      if (pane === null) lines.push(l + B('├') + B('─'.repeat(paneW)) + B('┤'));
-      else lines.push(l + B('│') + ' ' + fit(pane, paneW - 1) + B('│'));
+      if (pane === null) box.push(B('├') + B('─'.repeat(boxW - 2)) + B('┤'));
+      else box.push(B('│') + ' ' + fit(pane, boxW - 3) + B('│'));
     }
-    lines.push(B('╰' + (side ? '─'.repeat(sideW + 1) + '┴' : '') + '─'.repeat(Math.max(0, W - (side ? sideW + 4 : 2))) + '╯'));
+    box.push(B('╰' + '─'.repeat(Math.max(0, boxW - 2)) + '╯'));
+    while (box.length < rowsH) box.splice(box.length - 1, 0, B('│') + ' '.repeat(boxW - 2) + B('│'));
+    const lines = box.slice(0, rowsH).map((l, y) => (side ? (sideLines[y] || onBg('', this.sideBg(), sideW)) + ' ' : '') + l);
     lines.push(this.hintLine(W));
-    while (lines.length < H) lines.splice(lines.length - 2, 0, B('│') + ' '.repeat(W - 2) + B('│'));
 
     let cursor = null;
-    const base = side ? sideW + 4 : 2; // where the pane's text starts on screen
+    const base = side ? sideW + 3 : 2; // where the pane's text starts on screen
     if (editor && !this.menu) cursor = { row: 1 + bodyH + 1 + editor.row, col: base + 3 + editor.col };
     if (this.menu) {
       const page = this.menu.stack[this.menu.stack.length - 1];
@@ -1147,84 +1172,119 @@ class App {
     return ' ' + Th.dim(A.clip(opts[opts.length - 1], W - 2));
   }
 
+  /** The sidebar's own background: the paper, a shade towards the ink. */
+  sideBg() { const t = Th.t(); return mixHex(t.paper.fg, t.paper.bg, 0.055); }
+
+  /**
+   * The sidebar, a soft panel beside the chat:
+   *
+   *    tree of thought
+   *
+   *   [ + New chat        ctrl+n ]
+   *
+   *   Models                    4
+   *   ♣ Auto (free)          free
+   *  [✿ Gemini 2.5 Flash     free]   the one answering
+   *   + Add an AI model
+   *
+   *   Chats                     2
+   *   Today
+   *  [write me a haiku…       now]   the open one
+   *   what is a black hole    2h
+   *
+   *   today 3 asked · plenty left
+   */
   sideLines(w, h) {
     const t = Th.t();
-    const bg = t.paper.bg;
-    const out = [];
-    const rowAt = new Map();
-    const mark = (row) => rowAt.set(out.length, row);
+    const sb = this.sideBg();
     const isCur = (row) => this.sameRow(row, this.cursor);
+    const inner = w - 2; // a column of margin each side
+    // one row: optional pill colour, text left and right; `mark` is the '›' in the margin
+    const row = (left, right = '', pill = null, mark = '') => {
+      const body = ' ' + spread(left, right, inner - 2) + ' ';
+      return (mark ? A.paint(mark, { fg: t.leaf, bold: true }) : ' ') + (pill ? onBg(body, pill, inner) : fit(body, inner)) + ' ';
+    };
+    const head = (text, right = '') => row(A.paint(text, { fg: t.dim, bold: true }), Th.faint(right));
+    const top = [];
+    const body = [];
+    const foot = [];
+    const marks = new Map(); // index in body → row
+    const add = (r, line) => { marks.set(body.length, r); body.push(line); };
 
-    // ── the garden: one or two lines per model, a small plant icon each ──
-    const gap = (l, r) => spread(l, r, w - 2);
-    out.push(' ' + gap(Th.leaf('Garden', { bold: true }), Th.faint(this.garden.length ? String(this.garden.length) : '')));
-    if (this.garden.some(F.isAuto)) {
-      if (!this.meterAt || Date.now() - this.meterAt > 15000) { this.meterAt = Date.now(); try { this.meterLine = Me.line(Me.summary(this.garden, this.keys)); } catch { this.meterLine = ''; } }
-      if (this.meterLine) out.push(' ' + Th.faint(A.clip(this.meterLine.replace(/^today: /, 'today '), w - 2)));
-    }
-    out.push('');
+    // the name, level with the chat's top edge
+    top.push(row(A.paint('✿', { fg: t.blossom }) + ' ' + A.paint('tree of thought', { fg: t.leaf, bold: true })));
+    top.push('');
+    { const r = { kind: 'new' }; const cur = isCur(r); top.push(row(A.paint('+ New chat', { fg: t.leaf, bold: true }), Th.faint('ctrl+n'), mixHex(t.leaf, sb, cur ? 0.24 : 0.12), cur ? '›' : '')); this.newRowY = 2; }
+    top.push('');
+
+    // ── the models ──
+    body.push(head('Models', this.garden.length ? String(this.garden.length) : ''));
     if (!this.garden.length) {
-      out.push(Th.dim('  Nothing planted yet.'));
-      out.push(Th.dim('  Press Enter to set up'));
-      out.push(Th.dim('  free AI in a minute.'));
-      out.push('');
+      body.push(row(Th.dim('No AI yet.')));
+      body.push(row(Th.dim('Press Enter to set up')));
+      body.push(row(Th.dim('free AI in a minute.')));
     }
     this.garden.forEach((m, i) => {
-      const row = { kind: 'model', i };
+      const r = { kind: 'model', i };
       const plant = Pl.plantFor(m);
-      const chosen = i === (this.cfg.current || 0);
-      const here = isCur(row);
       const col = Pl.color(plant);
-      const edge = chosen ? A.paint('▌', { fg: col }) : here ? Th.leaf('›') : ' ';
+      const chosen = i === (this.cfg.current || 0);
+      const cur = isCur(r);
       const busy = [...this.jobs.values()].some((j) => keyOf(j.model) === keyOf(m));
-      const name = A.paint(A.clip(m.name, w - 7), chosen ? { bold: true, fg: col } : { fg: here ? t.leaf : t.paper.fg });
-      const free = m.provider === 'ollama' || m.free || /:free$/.test(m.id) || F.isAuto(m);
-      const who = F.isAuto(m) ? 'picks a free model' : whoText(m).replace(' · via ', ' · ').replace(' · on this computer', ' · this computer');
-      mark(row);
-      out.push(edge + ' ' + A.paint(Pl.glyph(plant), { fg: col }) + ' ' + name + (busy ? ' ' + Th.sun('•') : ''));
-      mark(row);
-      out.push((chosen ? A.paint('▌', { fg: col }) : ' ') + '   ' + Th.faint(A.clip(who + (free && !F.isAuto(m) && m.provider !== 'ollama' ? ' · free' : ''), w - 6)));
+      const tag = busy ? Th.sun('thinking') : F.isAuto(m) ? Th.faint('picks') : m.provider === 'ollama' ? Th.faint('this Mac') : (m.free || /:free$/.test(m.id)) ? Th.faint('free') : '';
+      const name = A.paint(A.ellipsis(m.name, inner - 6 - A.vwidth(tag)), chosen ? { fg: col, bold: true } : { fg: cur ? t.leaf : t.paper.fg });
+      add(r, row(A.paint(Pl.glyph(plant), { fg: col }) + ' ' + name, tag, chosen ? mixHex(col, sb, cur ? 0.22 : 0.13) : cur ? t.select : null, cur ? '›' : ''));
     });
-    { const row = { kind: 'add' }; mark(row); out.push((isCur(row) ? Th.leaf('›') : ' ') + ' ' + Th.leaf('+') + ' ' + Th.dim('Plant a model')); }
-    out.push('');
-    out.push('');
-    // ── chats ──
-    const pr = this.project(this.cfg.project);
-    out.push(' ' + gap(Th.blossom(pr ? A.clip(pr.name, w - 12) : 'Chats', { bold: true }), Th.faint(pr ? 'project' : '')));
-    out.push('');
-    for (const c of this.visibleChats().slice(0, 30)) {
-      const row = { kind: 'chat', id: c.id };
-      const open = c.id === this.chat.id;
-      const here = isCur(row);
-      const when = Th.faint(require('./tui').ago(c.updated).replace(' ago', ''));
-      mark(row);
-      out.push((open ? Th.blossom('▌') : here ? Th.blossom('›') : ' ') + ' ' + spread(A.paint(A.clip(c.title, w - 10), open ? { bold: true } : here ? { fg: t.blossom } : {}), when, w - 3));
-    }
-    { const row = { kind: 'new' }; mark(row); out.push((isCur(row) ? Th.blossom('›') : ' ') + ' ' + Th.blossom('+') + ' ' + Th.dim('New chat')); }
+    { const r = { kind: 'add' }; const cur = isCur(r); add(r, row(Th.leaf('+') + ' ' + A.paint('Add an AI model', { fg: cur ? t.leaf : t.dim }), '', cur ? t.select : null, cur ? '›' : '')); }
+    body.push('');
 
-    // keep the highlighted row on screen, and Rowan at the bottom when there's room
-    // Rowan sits at the bottom only when everything above still fits
-    const room = h - (R.HEIGHT + 1);
-    const tree = !this.chat.empty && room >= 10 && out.length <= room;
-    let lines = out;
+    // ── the chats, by when ──
+    const pr = this.project(this.cfg.project);
+    const chats = this.visibleChats().slice(0, 30);
+    body.push(head(pr ? A.clip(pr.name, inner - 12) : 'Chats', chats.length ? String(chats.length) : ''));
+    if (!chats.length) body.push(row(Th.faint('Your chats show up here.')));
+    const day = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
+    const today = day(Date.now());
+    const groupOf = (ms) => (ms >= today ? 'Today' : ms >= today - 864e5 ? 'Yesterday' : ms >= today - 6 * 864e5 ? 'This week' : 'Earlier');
+    let group = null;
+    for (const c of chats) {
+      const g = groupOf(c.updated || 0);
+      if (g !== group) { if (group) body.push(''); group = g; body.push(row(Th.faint(g))); }
+      const r = { kind: 'chat', id: c.id };
+      const open = c.id === this.chat.id;
+      const cur = isCur(r);
+      const when = Th.faint(short(c.updated));
+      const title = A.paint(A.ellipsis(c.title || 'New chat', inner - 4 - A.vwidth(when)), open ? { bold: true, fg: t.paper.fg } : { fg: cur ? t.blossom : t.dim });
+      add(r, row(title, when, open ? mixHex(t.blossom, sb, cur ? 0.22 : 0.13) : cur ? t.select : null, cur ? '›' : ''));
+    }
+
+    // ── the bottom: how much free AI is left today ──
+    if (this.garden.some(F.isAuto)) {
+      if (!this.meterAt || Date.now() - this.meterAt > 15000) { this.meterAt = Date.now(); try { this.meterLine = Me.line(Me.summary(this.garden, this.keys)); } catch { this.meterLine = ''; } }
+      if (this.meterLine) foot.push(row(Th.faint(A.clip(this.meterLine.replace(/^today: /, 'today '), inner - 2))));
+    }
+    foot.push(row(Th.faint('ctrl+b hides this')));
+
+    // the middle scrolls when it's long, keeping the highlighted row in view
+    const room = Math.max(1, h - top.length - foot.length - 1);
     let first = 0;
-    if (out.length > (tree ? room : h)) {
-      const want = tree ? room : h;
-      const cur = [...rowAt.entries()].filter(([, r]) => isCur(r)).map(([y]) => y);
-      const c = cur.length ? cur[cur.length - 1] : 0;
-      first = Math.max(0, Math.min(out.length - want, c - Math.floor(want / 2)));
-      lines = out.slice(first, first + want);
-      if (first + want < out.length) lines[lines.length - 1] = Th.faint('  ↓ more');
-      if (first > 0) lines[0] = Th.faint('  ↑ more');
+    let shown = body;
+    if (body.length > room) {
+      const ys = [...marks.entries()].filter(([, r]) => isCur(r)).map(([y]) => y);
+      const c = ys.length ? ys[0] : 0;
+      first = Math.max(0, Math.min(body.length - room, c - Math.floor(room / 2)));
+      shown = body.slice(first, first + room);
+      if (first > 0) shown[0] = row(Th.faint('↑ more'));
+      if (first + room < body.length) shown[shown.length - 1] = row(Th.faint('↓ more'));
     }
-    this.hit = new Map();
-    for (const [y, r] of rowAt) if (y >= first && y < first + lines.length) this.hit.set(1 + y - first, r);
-    if (tree) {
-      while (lines.length < room) lines.push('');
-      lines.push('');
-      for (const l of this.rowan(bg)) lines.push(' '.repeat(Math.max(0, Math.floor((w - R.WIDTH) / 2))) + l);
-    }
-    return lines;
+    const lines = [...top, ...shown];
+    while (lines.length < h - foot.length) lines.push('');
+    lines.push(...foot);
+    // where each row is on screen, for clicks
+    this.hit = new Map([[2, { kind: 'new' }]]);
+    for (const [y, r] of marks) if (y >= first && y < first + shown.length) this.hit.set(top.length + y - first, r);
+    // paint the whole column in the sidebar's colour
+    return lines.slice(0, h).map((l) => onBg(l, sb, w));
   }
 
   rowan(bg) {

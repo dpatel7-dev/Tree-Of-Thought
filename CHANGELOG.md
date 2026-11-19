@@ -1,5 +1,10 @@
 # Changelog
 
+
+## 2.3.0
+- **A new sidebar.** It's now a calm panel of its own beside the chat instead of a cramped box: a big **New chat** button at the top, one tidy line per AI model (the one answering is softly highlighted, with "free" or "this Mac" beside it), and your chats grouped into Today, Yesterday, This week and Earlier with how long ago each was. Long names end in "…" instead of being chopped. How much free AI is left today sits quietly at the bottom.
+- The big tree no longer squeezes the sidebar; Rowan still greets you on the welcome screen.
+
 ## 2.2.0
 - A roomier garden sidebar: each model is one clean line with a small plant icon (no more big pictures crowding the text), its maker on a quieter line under it, and the one you're using marked with a bar in its colour. Chats have room, and nothing gets cut off.
 - Clean pictures in macOS Terminal: Rowan is drawn with whole cells there (no thin stripes), smaller and tidier. The welcome screen never shows half a tree on a small window. `TUI_PIXELS=smooth` brings back the detailed one.
